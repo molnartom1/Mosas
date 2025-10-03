@@ -47,6 +47,12 @@
     .machine-info{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
     .machine-info img{width:140px;max-height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--border);background:#fff}
     .link-btn{display:inline-block;text-decoration:none;padding:8px 12px;border-radius:10px}
+    /* Szűrő rács */
+    .filters{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+    .filters .col-2{grid-column:span 2}
+    .filters .col-3{grid-column:span 3}
+    .filters .col-6{grid-column:span 6}
+    @media(max-width:900px){.filters{grid-template-columns:repeat(2,1fr)} .filters .col-3,.filters .col-6{grid-column:span 2}}
   </style>
 </head>
 <body>
@@ -68,6 +74,44 @@
           <a class="link-btn primary" href="https://d15v10x8t3bz3x.cloudfront.net/Libretti/2024/8/17229341/70029341WDRapidoRPWNECCSHUROSK" target="_blank" rel="noopener">📘 Kézikönyv (HU/RO/SK)</a>
           <a class="link-btn muted" href="https://docgenerator.candy.it/docgenerator/productdetails?lan=HU&sku=31019842&mkt=hu" target="_blank" rel="noopener">📄 Terméklap</a>
           <small style="opacity:.85">A programlista a kézikönyv Programtáblázat alapján lett előtöltve.</small>
+        </div>
+      </div>
+    </section>
+
+    <!-- SZŰRŐK -->
+    <section class="card" aria-labelledby="filtersTitle">
+      <h2 id="filtersTitle" style="margin:0 0 8px 0;font-size:1.1rem">Szűrők</h2>
+      <div class="filters">
+        <div class="col-3">
+          <label for="searchQ">Gyors keresés</label>
+          <input id="searchQ" placeholder="Név, tétel, program, mosószer, öblítő..." />
+        </div>
+        <div>
+          <label for="fromDate">Dátumtól</label>
+          <input type="date" id="fromDate" />
+        </div>
+        <div>
+          <label for="toDate">Dátumig</label>
+          <input type="date" id="toDate" />
+        </div>
+        <div>
+          <label for="personFilter">Személy</label>
+          <select id="personFilter"><option value="">(Mind)</option></select>
+        </div>
+        <div>
+          <label for="programFilter">Program</label>
+          <select id="programFilter"><option value="">(Mind)</option></select>
+        </div>
+        <div>
+          <label for="dryFilter">Szárítás</label>
+          <select id="dryFilter">
+            <option value="">(Mind)</option>
+            <option>Igen</option>
+            <option>Nem</option>
+          </select>
+        </div>
+        <div class="col-6">
+          <button id="resetFilters" class="muted" type="button">Szűrők törlése</button>
         </div>
       </div>
     </section>
@@ -177,6 +221,7 @@
         </thead>
         <tbody id="tableBody"></tbody>
       </table>
+      <div id="emptyState" style="opacity:.8;margin-top:8px;display:none">Nincs találat a beállított szűrőkre.</div>
     </section>
   </div>
 
@@ -208,7 +253,7 @@
 
   <script>
     // ----- Állandók és állapot -----
-    const DATA_KEY = 'laundry_simple_v7';
+    const DATA_KEY = 'laundry_simple_v8';
     const DET_KEY  = 'laundry_detergents_v1';
     const SOFT_KEY = 'laundry_softeners_v1';
     const PROG_KEY = 'laundry_programs_v1';
@@ -236,17 +281,17 @@
       localStorage.setItem(THEME_KEY, theme);
       $('#themeToggle').textContent = theme==='light' ? '🌞' : '🌙';
     }
-
     function initTheme(){
       const saved = localStorage.getItem(THEME_KEY);
-      if(saved){ applyTheme(saved); return; }
-      const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-      applyTheme(prefersLight ? 'light' : 'dark');
-      // reagáljon rendszer-váltásra is, ha nincs kézi állítás
-      const mq = window.matchMedia('(prefers-color-scheme: light)');
-      mq.addEventListener && mq.addEventListener('change', e=>{
-        if(!localStorage.getItem(THEME_KEY)) applyTheme(e.matches ? 'light' : 'dark');
-      });
+      if(saved){ applyTheme(saved); }
+      else {
+        const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        applyTheme(prefersLight ? 'light' : 'dark');
+        const mq = window.matchMedia('(prefers-color-scheme: light)');
+        mq.addEventListener && mq.addEventListener('change', e=>{
+          if(!localStorage.getItem(THEME_KEY)) applyTheme(e.matches ? 'light' : 'dark');
+        });
+      }
     }
 
     // ----- Mentés / Betöltés -----
@@ -257,24 +302,16 @@
       localStorage.setItem(PROG_KEY, JSON.stringify(programs));
       $('#autosaveStatus').textContent='Mentve '+new Date().toLocaleTimeString('hu-HU');
     }
-
     function loadAll(){
       entries    = safeParse(localStorage.getItem(DATA_KEY), []);
       detergents = safeParse(localStorage.getItem(DET_KEY), ['Ariel','Persil','OMO','Tommy']);
       softeners  = safeParse(localStorage.getItem(SOFT_KEY), ['Lenor','Silan','Softlan','Nincs']);
       programs   = safeParse(localStorage.getItem(PROG_KEY), [
-        'ECO 40-60',
-        'GYAPJÚ/KÉZI',
-        "GYORS 14'", "GYORS 30'", "GYORS 44'",
-        'KÖNNYŰ VASALÁS PLUSZ',
-        'MŰSZÁL ÉS SZÍNES',
-        'ÖBLÍTÉS',
-        'PAMUT',
-        "SPECIAL 39'",
-        "TÖKÉLETES PAMUT 59'",
-        "VEGYES ÉS SZÍNES 59'"
-      ].sort());
+        'ECO 40-60', 'GYAPJÚ/KÉZI', "GYORS 14'", "GYORS 30'", "GYORS 44'",
+        'KÖNNYŰ VASALÁS PLUSZ', 'MŰSZÁL ÉS SZÍNES', 'ÖBLÍTÉS', 'PAMUT', "SPECIAL 39'", "TÖKÉLETES PAMUT 59'", "VEGYES ÉS SZÍNES 59'"
+      ].sort((a,b)=>a.localeCompare(b,'hu')));
       rebuildSelects();
+      rebuildFilterOptions();
       render();
     }
 
@@ -291,16 +328,63 @@
       if(programs[0])   progSel.value = progSel.value || programs[0];
     }
 
+    // ----- Szűrők -----
+    function rebuildFilterOptions(){
+      const persons = Array.from(new Set(entries.map(e=>e.person).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'hu'));
+      const personSel = $('#personFilter');
+      personSel.innerHTML = '<option value="">(Mind)</option>' + persons.map(p=>`<option>${p}</option>`).join('');
+
+      const progSel = $('#programFilter');
+      progSel.innerHTML = '<option value="">(Mind)</option>' + programs.map(p=>`<option>${p}</option>`).join('');
+    }
+
+    function getFilters(){
+      return {
+        q: ($('#searchQ').value||'').toLowerCase(),
+        from: $('#fromDate').value || '',
+        to: $('#toDate').value || '',
+        person: $('#personFilter').value || '',
+        program: $('#programFilter').value || '',
+        dry: $('#dryFilter').value || ''
+      };
+    }
+
+    function passFilters(e, f){
+      if(f.from && e.date < f.from) return false;
+      if(f.to   && e.date > f.to)   return false;
+      if(f.person && e.person !== f.person) return false;
+      if(f.program && e.program !== f.program) return false;
+      if(f.dry && e.dry !== f.dry) return false;
+      if(f.q){
+        const hay = [e.person,e.item,e.program,e.detergent,e.softener,e.color,String(e.qty)].join(' ').toLowerCase();
+        if(!hay.includes(f.q)) return false;
+      }
+      return true;
+    }
+
+    function attachFilterEvents(){
+      ['searchQ','fromDate','toDate','personFilter','programFilter','dryFilter'].forEach(id=>{
+        const el = document.getElementById(id);
+        el && el.addEventListener('input', render);
+        el && el.addEventListener('change', render);
+      });
+      document.getElementById('resetFilters').addEventListener('click', ()=>{
+        ['searchQ','fromDate','toDate'].forEach(id=>document.getElementById(id).value='');
+        ['personFilter','programFilter','dryFilter'].forEach(id=>document.getElementById(id).value='');
+        render();
+      });
+    }
+
+    // ----- CRUD -----
     function addToList(kind, value){
       value = (value||'').trim();
       if(!value) return;
       if(kind==='det'){ if(!detergents.includes(value)) detergents.push(value); $('#detergent').value=value; $('#detergentNew').value=''; }
       if(kind==='sof'){ if(!softeners.includes(value)) softeners.push(value); $('#softener').value=value; $('#softenerNew').value=''; }
-      if(kind==='prog'){ if(!programs.includes(value)) programs.push(value); programs.sort((a,b)=>a.localeCompare(b,'hu')); $('#program').value=value; $('#programNew').value=''; }
+      if(kind==='prog'){ if(!programs.includes(value)) programs.push(value); programs.sort((a,b)=>a.localeCompare(b,'hu')); $('#program').value=value; $('#programNew').value=''; rebuildFilterOptions(); }
       saveAll(); rebuildSelects();
     }
 
-    // ----- CRUD -----
     function readForm(){
       return {
         id:editId||uid(),
@@ -328,14 +412,15 @@
     }
 
     function clearForm(){ editId=null; $('#washForm').reset(); $('#date').value=today(); $('#qty').value=1; $('#saveBtn').textContent='Hozzáadás'; $('#deleteBtn').disabled=true; rebuildSelects(); }
-
-    function upsert(e){ const i=entries.findIndex(x=>x.id===e.id); if(i>-1) entries[i]=e; else entries.unshift(e); saveAll(); render(); }
-    function remove(id){ entries = entries.filter(e=>e.id!==id); saveAll(); render(); }
+    function upsert(e){ const i=entries.findIndex(x=>x.id===e.id); if(i>-1) entries[i]=e; else entries.unshift(e); saveAll(); rebuildFilterOptions(); render(); }
+    function remove(id){ entries = entries.filter(e=>e.id!==id); saveAll(); rebuildFilterOptions(); render(); }
 
     // ----- Render -----
     function render(){
       const tb=$('#tableBody'); tb.innerHTML='';
-      for(const e of entries){
+      const f = getFilters();
+      const filtered = entries.filter(e=>passFilters(e,f));
+      for(const e of filtered){
         const row = $('#rowTemplate').content.firstElementChild.cloneNode(true);
         row.dataset.id=e.id;
         row.querySelector('[data-col=date]').textContent=e.date;
@@ -347,6 +432,7 @@
         row.querySelector('[data-col=details]').textContent=`${e.temp||'-'}°C / ${e.spin||'-'}rpm / ${e.color||'-'} / Szárítás: ${e.dry} / Mosószer: ${e.detergent||'-'} / Öblítő: ${e.softener||'-'}`;
         tb.appendChild(row);
       }
+      document.getElementById('emptyState').style.display = filtered.length? 'none':'block';
     }
 
     // ----- Export / Import -----
@@ -359,7 +445,6 @@
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
     }
-
     function importAll(file){
       const reader = new FileReader();
       reader.onload = () => {
@@ -370,7 +455,7 @@
           if(Array.isArray(data.detergents)) detergents = data.detergents;
           if(Array.isArray(data.softeners)) softeners = data.softeners;
           if(Array.isArray(data.programs)) programs = data.programs;
-          saveAll(); rebuildSelects(); render();
+          saveAll(); rebuildSelects(); rebuildFilterOptions(); render();
           alert('Import kész!');
         }catch(err){ alert('Import hiba: '+err.message); }
       };
@@ -445,6 +530,9 @@
       // Export / Import
       $('#exportAll').addEventListener('click', exportAll);
       $('#importAll').addEventListener('change', e=>{ const f=e.target.files[0]; if(f) importAll(f); e.target.value=''; });
+
+      // Szűrő események
+      attachFilterEvents();
     });
   </script>
 </body>
