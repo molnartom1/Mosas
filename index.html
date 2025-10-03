@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mosás nyilvántartás</title>
+  <style>
+    :root{ --bg:#0f172a; --panel:#111827; --muted:#0b1220; --border:#334155; --text:#e5e7eb; --accent:#22d3ee; --danger:#ef4444; }
+    :root.light{ --bg:#f9fafb; --panel:#ffffff; --muted:#f3f4f6; --border:#d1d5db; --text:#111827; --accent:#0ea5e9; --danger:#dc2626; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--text);transition:background .3s,color .3s}
+    .container{max-width:1200px;margin:0 auto;padding:24px}
+    header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px}
+    h1{margin:0;font-size:1.5rem}
+    .theme-toggle{cursor:pointer;font-size:1.3rem;background:none;border:none;color:var(--text)}
+    .card{padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--panel);margin-bottom:16px;transition:background .3s,border .3s}
+    fieldset{border:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    label{font-size:14px}
+    input,select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--muted);color:var(--text);transition:background .3s,color .3s,border .3s}
+    .row-2{grid-column:span 2}
+    .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    button{border:none;padding:10px 14px;border-radius:10px;cursor:pointer;color:#0b1220;font-weight:600;transition:background .3s}
+    .primary{background:var(--accent)}
+    .muted{background:#1f2937;color:var(--text)}
+    :root.light .muted{background:#e5e7eb;color:#111827}
+    .danger{background:var(--danger);color:white}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid var(--border);padding:8px 10px;text-align:left}
+    th{background:var(--muted)}
+    /* Hover és kijelölés */
+    #dataTable tbody tr:hover {background: rgba(34,211,238,0.15); cursor:pointer;}
+    #dataTable tbody tr.selected {background: rgba(34,211,238,0.35);}
+    /* Szegmens-szerű rádiógombok */
+    .radio-group{display:flex;gap:10px;align-items:center}
+    .segmented{display:inline-flex;gap:8px;background:var(--muted);border:1px solid var(--border);border-radius:12px;padding:6px}
+    .segmented input[type=radio]{position:absolute;opacity:0;pointer-events:none}
+    .segmented label{padding:8px 12px;border-radius:8px;cursor:pointer;user-select:none;border:1px solid transparent;min-width:64px;text-align:center}
+    .segmented input[type=radio]:focus + label{outline:2px solid color-mix(in oklab, var(--accent) 60%, transparent)}
+    .segmented input[type=radio]:checked + label{background:var(--accent); color:#0b1220; font-weight:700}
+    /* PIN modal */
+    .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(0,0,0,.5);z-index:50}
+    .modal-card{width:min(420px,90vw);background:var(--muted);border:1px solid var(--border);border-radius:14px;padding:16px}
+    .modal-card h3{margin:0 0 8px 0}
+    .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+    .hint{font-size:12px;opacity:.8}
+    .error{color:#fecaca;font-size:13px;min-height:18px}
+    .machine-info{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+    .machine-info img{width:140px;max-height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--border);background:#fff}
+    .link-btn{display:inline-block;text-decoration:none;padding:8px 12px;border-radius:10px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🧺 Mosás nyilvántartás</h1>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div id="autosaveStatus">Automatikus mentés aktív</div>
+        <button id="themeToggle" class="theme-toggle" title="Világos/Sötét mód">🌙</button>
+      </div>
+    </header>
+
+    <!-- Gép információ blokk -->
+    <section class="card" aria-labelledby="machineInfoTitle">
+      <h2 id="machineInfoTitle" style="margin:0 0 8px 0;font-size:1.1rem">Mosógép: <strong>CANDY RPW 4856BWR8</strong></h2>
+      <div class="machine-info">
+        <img id="machinePhoto" src="Candy.webp" alt="CANDY RPW 4856BWR8" />
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <a class="link-btn primary" href="https://d15v10x8t3bz3x.cloudfront.net/Libretti/2024/8/17229341/70029341WDRapidoRPWNECCSHUROSK" target="_blank" rel="noopener">📘 Kézikönyv (HU/RO/SK)</a>
+          <a class="link-btn muted" href="https://docgenerator.candy.it/docgenerator/productdetails?lan=HU&sku=31019842&mkt=hu" target="_blank" rel="noopener">📄 Terméklap</a>
+          <small style="opacity:.85">A programlista a kézikönyv Programtáblázat alapján lett előtöltve.</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <form id="washForm" autocomplete="off">
+        <input type="hidden" id="entryId" />
+        <fieldset>
+          <div>
+            <label for="date">Dátum</label>
+            <input type="date" id="date" required />
+          </div>
+          <div>
+            <label for="person">Személy</label>
+            <input id="person" placeholder="pl. Anna" required />
+          </div>
+          <!-- Program (bővíthető) -->
+          <div class="row-2">
+            <label for="program">Program</label>
+            <select id="program"></select>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <input id="programNew" placeholder="Új program hozzáadása (pl. Pamut 40)" />
+              <button type="button" class="muted" id="programAdd">+ Hozzáadás</button>
+            </div>
+          </div>
+          <div>
+            <label for="temp">Hőfok (°C)</label>
+            <input id="temp" type="number" min="0" max="95" step="5" placeholder="40" />
+          </div>
+          <div>
+            <label for="spin">Centrifuga (rpm)</label>
+            <input id="spin" type="number" min="0" max="1400" step="100" placeholder="1000" />
+          </div>
+          <div>
+            <label for="color">Szín</label>
+            <select id="color">
+              <option>Vegyes</option>
+              <option>Fehér</option>
+              <option>Színes</option>
+              <option>Fekete</option>
+            </select>
+          </div>
+          <div>
+            <label for="qty">Darabszám</label>
+            <input id="qty" type="number" min="1" value="1" required />
+          </div>
+          <div class="row-2">
+            <label for="item">Tétel(ek)</label>
+            <input id="item" placeholder="pl. pólók, törölközők" required />
+          </div>
+          <!-- Szárítás rádiógombok (szegmens) -->
+          <div class="row-2">
+            <label>Szárítás</label>
+            <div class="radio-group">
+              <div class="segmented">
+                <input type="radio" id="dryYes" name="dry" value="Igen" checked>
+                <label for="dryYes">Igen</label>
+                <input type="radio" id="dryNo" name="dry" value="Nem">
+                <label for="dryNo">Nem</label>
+              </div>
+            </div>
+          </div>
+          <!-- MOSÓSZER (külön sor) -->
+          <div class="row-2">
+            <label for="detergent">Mosószer</label>
+            <select id="detergent"></select>
+            <div class="inline-add" style="display:flex;gap:8px;margin-top:6px">
+              <input id="detergentNew" placeholder="Új mosószer hozzáadása" />
+              <button type="button" class="muted" id="detergentAdd">+ Hozzáadás</button>
+            </div>
+          </div>
+          <!-- ÖBLÍTŐ (külön sor) -->
+          <div class="row-2">
+            <label for="softener">Öblítő</label>
+            <select id="softener"></select>
+            <div class="inline-add" style="display:flex;gap:8px;margin-top:6px">
+              <input id="softenerNew" placeholder="Új öblítő hozzáadása" />
+              <button type="button" class="muted" id="softenerAdd">+ Hozzáadás</button>
+            </div>
+          </div>
+        </fieldset>
+        <div class="actions">
+          <button type="submit" class="primary" id="saveBtn">Hozzáadás</button>
+          <button type="button" class="muted" id="resetBtn">Űrlap törlése</button>
+          <button type="button" class="danger" id="deleteBtn" disabled>Törlés</button>
+          <button type="button" class="muted" id="exportAll">Összes export (JSON)</button>
+          <label class="muted" style="display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:10px;cursor:pointer">
+            Import (JSON)
+            <input id="importAll" type="file" accept="application/json" style="display:none" />
+          </label>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <table id="dataTable">
+        <thead>
+          <tr>
+            <th>Dátum</th>
+            <th>Személy</th>
+            <th>Tétel</th>
+            <th>Darab</th>
+            <th>Mosógép</th>
+            <th>Program</th>
+            <th>Részletek</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </section>
+  </div>
+
+  <!-- PIN kód modal törléshez -->
+  <div id="pinModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
+    <div class="modal-card">
+      <h3 id="pinTitle">PIN szükséges</h3>
+      <p class="hint">Add meg a 4 számjegyű PIN kódot a törléshez.</p>
+      <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="••••" style="letter-spacing:4px;text-align:center" />
+      <div class="error" id="pinError"></div>
+      <div class="modal-actions">
+        <button type="button" class="muted" id="pinCancel">Mégse</button>
+        <button type="button" class="primary" id="pinOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="rowTemplate">
+    <tr>
+      <td data-col="date"></td>
+      <td data-col="person"></td>
+      <td data-col="item"></td>
+      <td data-col="qty"></td>
+      <td data-col="machine"></td>
+      <td data-col="program"></td>
+      <td data-col="details"></td>
+    </tr>
+  </template>
+
+  <script>
+    // ----- Állandók és állapot -----
+    const DATA_KEY = 'laundry_simple_v7';
+    const DET_KEY  = 'laundry_detergents_v1';
+    const SOFT_KEY = 'laundry_softeners_v1';
+    const PROG_KEY = 'laundry_programs_v1';
+    const THEME_KEY= 'laundry_theme';
+    const PIN_KEY  = 'laundry_pin_v1';
+    const DEFAULT_PIN = '2024';
+
+    let entries = [];
+    let detergents = [];
+    let softeners = [];
+    let programs = [];
+    let editId = null;
+
+    const $ = s => document.querySelector(s);
+
+    function uid(){return 'e'+Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4)}
+    function today(){return new Date().toISOString().slice(0,10)}
+    function currentPIN(){ return localStorage.getItem(PIN_KEY) || DEFAULT_PIN; }
+    function safeParse(json, fallback){ try{ const v = JSON.parse(json); return v==null?fallback:v; } catch{ return fallback; } }
+
+    // ----- Téma (világos/sötét) -----
+    function applyTheme(theme){
+      if(theme==='light') document.documentElement.classList.add('light');
+      else document.documentElement.classList.remove('light');
+      localStorage.setItem(THEME_KEY, theme);
+      $('#themeToggle').textContent = theme==='light' ? '🌞' : '🌙';
+    }
+
+    function initTheme(){
+      const saved = localStorage.getItem(THEME_KEY);
+      if(saved){ applyTheme(saved); return; }
+      const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      applyTheme(prefersLight ? 'light' : 'dark');
+      // reagáljon rendszer-váltásra is, ha nincs kézi állítás
+      const mq = window.matchMedia('(prefers-color-scheme: light)');
+      mq.addEventListener && mq.addEventListener('change', e=>{
+        if(!localStorage.getItem(THEME_KEY)) applyTheme(e.matches ? 'light' : 'dark');
+      });
+    }
+
+    // ----- Mentés / Betöltés -----
+    function saveAll(){
+      localStorage.setItem(DATA_KEY, JSON.stringify(entries));
+      localStorage.setItem(DET_KEY, JSON.stringify(detergents));
+      localStorage.setItem(SOFT_KEY, JSON.stringify(softeners));
+      localStorage.setItem(PROG_KEY, JSON.stringify(programs));
+      $('#autosaveStatus').textContent='Mentve '+new Date().toLocaleTimeString('hu-HU');
+    }
+
+    function loadAll(){
+      entries    = safeParse(localStorage.getItem(DATA_KEY), []);
+      detergents = safeParse(localStorage.getItem(DET_KEY), ['Ariel','Persil','OMO','Tommy']);
+      softeners  = safeParse(localStorage.getItem(SOFT_KEY), ['Lenor','Silan','Softlan','Nincs']);
+      programs   = safeParse(localStorage.getItem(PROG_KEY), [
+        'ECO 40-60',
+        'GYAPJÚ/KÉZI',
+        "GYORS 14'", "GYORS 30'", "GYORS 44'",
+        'KÖNNYŰ VASALÁS PLUSZ',
+        'MŰSZÁL ÉS SZÍNES',
+        'ÖBLÍTÉS',
+        'PAMUT',
+        "SPECIAL 39'",
+        "TÖKÉLETES PAMUT 59'",
+        "VEGYES ÉS SZÍNES 59'"
+      ].sort());
+      rebuildSelects();
+      render();
+    }
+
+    function rebuildSelects(){
+      const detSel = $('#detergent');
+      const sofSel = $('#softener');
+      const progSel = $('#program');
+      detSel.innerHTML = ''; sofSel.innerHTML=''; progSel.innerHTML='';
+      for(const v of detergents){ const o=document.createElement('option'); o.textContent=v; o.value=v; detSel.appendChild(o); }
+      for(const v of softeners){ const o=document.createElement('option'); o.textContent=v; o.value=v; sofSel.appendChild(o); }
+      for(const v of programs){ const o=document.createElement('option'); o.textContent=v; o.value=v; progSel.appendChild(o); }
+      if(detergents[0]) detSel.value = detSel.value || detergents[0];
+      if(softeners[0])  sofSel.value = sofSel.value || softeners[0];
+      if(programs[0])   progSel.value = progSel.value || programs[0];
+    }
+
+    function addToList(kind, value){
+      value = (value||'').trim();
+      if(!value) return;
+      if(kind==='det'){ if(!detergents.includes(value)) detergents.push(value); $('#detergent').value=value; $('#detergentNew').value=''; }
+      if(kind==='sof'){ if(!softeners.includes(value)) softeners.push(value); $('#softener').value=value; $('#softenerNew').value=''; }
+      if(kind==='prog'){ if(!programs.includes(value)) programs.push(value); programs.sort((a,b)=>a.localeCompare(b,'hu')); $('#program').value=value; $('#programNew').value=''; }
+      saveAll(); rebuildSelects();
+    }
+
+    // ----- CRUD -----
+    function readForm(){
+      return {
+        id:editId||uid(),
+        date:$('#date').value||today(),
+        person:$('#person').value.trim(),
+        machine:'CANDY RPW 4856BWR8',
+        program:$('#program').value,
+        temp:$('#temp').value,
+        spin:$('#spin').value,
+        color:$('#color').value,
+        qty:Math.max(1, Number($('#qty').value||1)),
+        item:$('#item').value.trim(),
+        dry:document.querySelector('input[name="dry"]:checked').value,
+        detergent:$('#detergent').value,
+        softener:$('#softener').value
+      }
+    }
+
+    function writeForm(e){
+      $('#date').value=e.date; $('#person').value=e.person; $('#program').value=e.program; $('#temp').value=e.temp; $('#spin').value=e.spin; $('#color').value=e.color; $('#qty').value=e.qty; $('#item').value=e.item;
+      if(e.dry==='Igen'){ document.getElementById('dryYes').checked=true; } else { document.getElementById('dryNo').checked=true; }
+      if(e.detergent){ if(detergents.includes(e.detergent)) $('#detergent').value=e.detergent; else addToList('det', e.detergent); }
+      if(e.softener){ if(softeners.includes(e.softener)) $('#softener').value=e.softener; else addToList('sof', e.softener); }
+      if(e.program){ if(programs.includes(e.program)) $('#program').value=e.program; else addToList('prog', e.program); }
+    }
+
+    function clearForm(){ editId=null; $('#washForm').reset(); $('#date').value=today(); $('#qty').value=1; $('#saveBtn').textContent='Hozzáadás'; $('#deleteBtn').disabled=true; rebuildSelects(); }
+
+    function upsert(e){ const i=entries.findIndex(x=>x.id===e.id); if(i>-1) entries[i]=e; else entries.unshift(e); saveAll(); render(); }
+    function remove(id){ entries = entries.filter(e=>e.id!==id); saveAll(); render(); }
+
+    // ----- Render -----
+    function render(){
+      const tb=$('#tableBody'); tb.innerHTML='';
+      for(const e of entries){
+        const row = $('#rowTemplate').content.firstElementChild.cloneNode(true);
+        row.dataset.id=e.id;
+        row.querySelector('[data-col=date]').textContent=e.date;
+        row.querySelector('[data-col=person]').textContent=e.person;
+        row.querySelector('[data-col=item]').textContent=e.item;
+        row.querySelector('[data-col=qty]').textContent=e.qty;
+        row.querySelector('[data-col=machine]').textContent=e.machine;
+        row.querySelector('[data-col=program]').textContent=e.program;
+        row.querySelector('[data-col=details]').textContent=`${e.temp||'-'}°C / ${e.spin||'-'}rpm / ${e.color||'-'} / Szárítás: ${e.dry} / Mosószer: ${e.detergent||'-'} / Öblítő: ${e.softener||'-'}`;
+        tb.appendChild(row);
+      }
+    }
+
+    // ----- Export / Import -----
+    function exportAll(){
+      const payload = { entries, detergents, softeners, programs, exportedAt: new Date().toISOString() };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `mosas_adatok_${new Date().toISOString().slice(0,10)}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    }
+
+    function importAll(file){
+      const reader = new FileReader();
+      reader.onload = () => {
+        try{
+          const data = JSON.parse(reader.result);
+          if(!data || typeof data !== 'object') throw new Error('Érvénytelen fájl');
+          if(Array.isArray(data.entries)) entries = data.entries; 
+          if(Array.isArray(data.detergents)) detergents = data.detergents;
+          if(Array.isArray(data.softeners)) softeners = data.softeners;
+          if(Array.isArray(data.programs)) programs = data.programs;
+          saveAll(); rebuildSelects(); render();
+          alert('Import kész!');
+        }catch(err){ alert('Import hiba: '+err.message); }
+      };
+      reader.readAsText(file);
+    }
+
+    // ----- PIN modal -----
+    function openPinModal(){
+      return new Promise(resolve=>{
+        const modal = $('#pinModal');
+        const input = $('#pinInput');
+        const err   = $('#pinError');
+        const okBtn = $('#pinOk');
+        const cancelBtn = $('#pinCancel');
+        err.textContent=''; input.value='';
+        modal.style.display = 'grid';
+        setTimeout(()=>input.focus(), 50);
+        function close(){ modal.style.display = 'none'; okBtn.removeEventListener('click',onOk); cancelBtn.removeEventListener('click',onCancel); input.removeEventListener('keydown',onKey); }
+        function onOk(){ const entered = input.value.trim(); if(entered === currentPIN()){ close(); resolve(true);} else { err.textContent='Hibás PIN.'; input.select(); } }
+        function onCancel(){ close(); resolve(false); }
+        function onKey(e){ if(e.key==='Enter') onOk(); if(e.key==='Escape') onCancel(); }
+        okBtn.addEventListener('click', onOk); cancelBtn.addEventListener('click', onCancel); input.addEventListener('keydown', onKey);
+      });
+    }
+
+    // ----- Események -----
+    document.addEventListener('DOMContentLoaded',()=>{
+      // Téma
+      initTheme();
+      $('#themeToggle').addEventListener('click',()=>{
+        const isLight = document.documentElement.classList.contains('light');
+        applyTheme(isLight ? 'dark' : 'light');
+      });
+
+      // Form alapok
+      $('#date').value = today();
+      loadAll();
+
+      // Fotó fallback (ha nincs kép)
+      const img = document.getElementById('machinePhoto');
+      img.onerror = () => { img.style.display='none'; };
+
+      // Hozzáadás/mentés
+      $('#washForm').addEventListener('submit', ev=>{
+        ev.preventDefault();
+        const e = readForm();
+        if(!e.person || !e.item){ alert('A "Személy" és a "Tétel(ek)" kötelező.'); return; }
+        upsert(e); clearForm();
+      });
+
+      // Törlés (PIN-védett)
+      $('#deleteBtn').addEventListener('click', async ()=>{
+        if(!editId) return;
+        const ok = await openPinModal();
+        if(ok){ remove(editId); clearForm(); }
+      });
+
+      // Szerkesztés és kijelölés: sorra kattintva
+      $('#tableBody').addEventListener('click', ev=>{
+        const tr = ev.target.closest('tr'); if(!tr) return;
+        [...$('#tableBody').children].forEach(r=>r.classList.remove('selected'));
+        tr.classList.add('selected');
+        editId = tr.dataset.id; const e = entries.find(x=>x.id===editId); if(!e) return;
+        writeForm(e); $('#saveBtn').textContent='Frissítés'; $('#deleteBtn').disabled=false; window.scrollTo({top:0,behavior:'smooth'});
+      });
+
+      // Inline hozzáadás a listákhoz
+      $('#detergentAdd').addEventListener('click', ()=> addToList('det', $('#detergentNew').value));
+      $('#softenerAdd').addEventListener('click', ()=> addToList('sof', $('#softenerNew').value));
+      $('#programAdd').addEventListener('click', ()=> addToList('prog', $('#programNew').value));
+
+      // Export / Import
+      $('#exportAll').addEventListener('click', exportAll);
+      $('#importAll').addEventListener('change', e=>{ const f=e.target.files[0]; if(f) importAll(f); e.target.value=''; });
+    });
+  </script>
+</body>
+</html>
