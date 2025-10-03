@@ -26,7 +26,11 @@
     .danger{background:var(--danger);color:white}
     table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{border:1px solid var(--border);padding:8px 10px;text-align:left}
-    th{background:var(--muted)}
+    th{background:var(--muted);user-select:none}
+    th.sortable{cursor:pointer}
+    th.sortable::after{content:'';float:right;margin-left:6px;opacity:0.6}
+    th.sortable.asc::after{content:'▲'}
+    th.sortable.desc::after{content:'▼'}
     /* Hover és kijelölés */
     #dataTable tbody tr:hover {background: rgba(34,211,238,0.15); cursor:pointer;}
     #dataTable tbody tr.selected {background: rgba(34,211,238,0.35);}
@@ -116,6 +120,7 @@
       </div>
     </section>
 
+    <!-- ŰRLAP -->
     <section class="card">
       <form id="washForm" autocomplete="off">
         <input type="hidden" id="entryId" />
@@ -206,16 +211,17 @@
       </form>
     </section>
 
+    <!-- TÁBLÁZAT -->
     <section class="card">
       <table id="dataTable">
         <thead>
           <tr>
-            <th>Dátum</th>
-            <th>Személy</th>
+            <th class="sortable" data-sort="date">Dátum</th>
+            <th class="sortable" data-sort="person">Személy</th>
             <th>Tétel</th>
-            <th>Darab</th>
+            <th class="sortable" data-sort="qty">Darab</th>
             <th>Mosógép</th>
-            <th>Program</th>
+            <th class="sortable" data-sort="program">Program</th>
             <th>Részletek</th>
           </tr>
         </thead>
@@ -239,6 +245,7 @@
     </div>
   </div>
 
+  <!-- Sor template -->
   <template id="rowTemplate">
     <tr>
       <td data-col="date"></td>
@@ -253,7 +260,7 @@
 
   <script>
     // ----- Állandók és állapot -----
-    const DATA_KEY = 'laundry_simple_v8';
+    const DATA_KEY = 'laundry_simple_v9';
     const DET_KEY  = 'laundry_detergents_v1';
     const SOFT_KEY = 'laundry_softeners_v1';
     const PROG_KEY = 'laundry_programs_v1';
@@ -266,6 +273,8 @@
     let softeners = [];
     let programs = [];
     let editId = null;
+
+    let sortState = { col:null, dir:1 }; // dir:1=asc, -1=desc
 
     const $ = s => document.querySelector(s);
 
@@ -315,6 +324,7 @@
       render();
     }
 
+    // ----- Selectek -----
     function rebuildSelects(){
       const detSel = $('#detergent');
       const sofSel = $('#softener');
@@ -375,6 +385,13 @@
       });
     }
 
+    // ----- Rendezés -----
+    function compareValues(a,b,type){
+      if(type==='date'){ return a.localeCompare(b); }
+      if(type==='qty'){ return (Number(a)||0) - (Number(b)||0); }
+      return a.localeCompare(b,'hu');
+    }
+
     // ----- CRUD -----
     function addToList(kind, value){
       value = (value||'').trim();
@@ -419,7 +436,16 @@
     function render(){
       const tb=$('#tableBody'); tb.innerHTML='';
       const f = getFilters();
-      const filtered = entries.filter(e=>passFilters(e,f));
+      let filtered = entries.filter(e=>passFilters(e,f));
+
+      if(sortState.col){
+        const type = sortState.col==='date' ? 'date' : (sortState.col==='qty' ? 'qty' : 'text');
+        filtered = filtered.slice().sort((x,y)=>{
+          const res = compareValues(String(x[sortState.col]||''), String(y[sortState.col]||''), type);
+          return res * (sortState.dir||1);
+        });
+      }
+
       for(const e of filtered){
         const row = $('#rowTemplate').content.firstElementChild.cloneNode(true);
         row.dataset.id=e.id;
@@ -433,6 +459,12 @@
         tb.appendChild(row);
       }
       document.getElementById('emptyState').style.display = filtered.length? 'none':'block';
+
+      // fejléc ikon frissítése
+      document.querySelectorAll('th.sortable').forEach(th=>{
+        th.classList.remove('asc','desc');
+        if(sortState.col===th.dataset.sort) th.classList.add(sortState.dir===1?'asc':'desc');
+      });
     }
 
     // ----- Export / Import -----
@@ -490,11 +522,11 @@
         applyTheme(isLight ? 'dark' : 'light');
       });
 
-      // Form alapok
+      // Alapok
       $('#date').value = today();
       loadAll();
 
-      // Fotó fallback (ha nincs kép)
+      // Kép fallback
       const img = document.getElementById('machinePhoto');
       img.onerror = () => { img.style.display='none'; };
 
@@ -506,14 +538,17 @@
         upsert(e); clearForm();
       });
 
-      // Törlés (PIN-védett)
+      // Űrlap törlése
+      $('#resetBtn').addEventListener('click', clearForm);
+
+      // Törlés (PIN)
       $('#deleteBtn').addEventListener('click', async ()=>{
         if(!editId) return;
         const ok = await openPinModal();
         if(ok){ remove(editId); clearForm(); }
       });
 
-      // Szerkesztés és kijelölés: sorra kattintva
+      // Szerkesztés/kijelölés
       $('#tableBody').addEventListener('click', ev=>{
         const tr = ev.target.closest('tr'); if(!tr) return;
         [...$('#tableBody').children].forEach(r=>r.classList.remove('selected'));
@@ -522,7 +557,7 @@
         writeForm(e); $('#saveBtn').textContent='Frissítés'; $('#deleteBtn').disabled=false; window.scrollTo({top:0,behavior:'smooth'});
       });
 
-      // Inline hozzáadás a listákhoz
+      // Inline bővítés
       $('#detergentAdd').addEventListener('click', ()=> addToList('det', $('#detergentNew').value));
       $('#softenerAdd').addEventListener('click', ()=> addToList('sof', $('#softenerNew').value));
       $('#programAdd').addEventListener('click', ()=> addToList('prog', $('#programNew').value));
@@ -531,8 +566,18 @@
       $('#exportAll').addEventListener('click', exportAll);
       $('#importAll').addEventListener('change', e=>{ const f=e.target.files[0]; if(f) importAll(f); e.target.value=''; });
 
-      // Szűrő események
+      // Szűrők
       attachFilterEvents();
+
+      // Rendezés a fejléceken
+      document.querySelectorAll('th.sortable').forEach(th=>{
+        th.addEventListener('click',()=>{
+          const col = th.dataset.sort;
+          if(sortState.col===col){ sortState.dir*=-1; }
+          else { sortState.col=col; sortState.dir=1; }
+          render();
+        });
+      });
     });
   </script>
 </body>
