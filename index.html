@@ -764,5 +764,122 @@
   };
   const app = initializeApp(firebaseConfig);
 </script>
+
+<!-- Firebase + Firestore élő szinkron -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+  import { 
+    getFirestore, enableIndexedDbPersistence,
+    collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy
+  } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+
+  // --- Konfiguráció ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyAeoxtOe5Cleasm3KdeSHP9WDR3PkU-N1I",
+    authDomain: "mosas-nyilvantartas.firebaseapp.com",
+    projectId: "mosas-nyilvantartas",
+    storageBucket: "mosas-nyilvantartas.firebasestorage.app",
+    messagingSenderId: "38259241645",
+    appId: "1:38259241645:web:26070b1d0686def9f00c24"
+  };
+
+  // --- Inicializálás ---
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+  enableIndexedDbPersistence(db).catch(()=>{});
+
+  // --- UI helper ---
+  function setCloudStatus(msg){
+    const el = document.getElementById('autosaveStatus');
+    if(el){ el.textContent = msg; }
+  }
+
+  // --- Cloud sync guard ---
+  window.firebaseReady = false;
+  window._cloudApplying = false; // ha felhőből érkezik frissítés, ne push-oljuk vissza
+
+  // --- Felhő műveletek ---
+  async function cloudPushLists(){
+    if(window._cloudApplying) return;
+    const listsRef = doc(db, 'lists', 'laundry');
+    await setDoc(listsRef, {
+      detergents: Array.isArray(window.detergents)? window.detergents : [],
+      softeners:  Array.isArray(window.softeners)?  window.softeners  : [],
+      programs:   Array.isArray(window.programs)?   window.programs   : []
+    }, { merge: true });
+  }
+  async function cloudPushAll(){
+    if(window._cloudApplying) return;
+    await cloudPushLists();
+    const base = collection(db, 'entries');
+    const list = Array.isArray(window.entries)? window.entries : [];
+    await Promise.all(list.map(e => setDoc(doc(base, e.id), e, { merge: true })));
+    setCloudStatus('Mentve (felhő szinkron) ' + new Date().toLocaleTimeString('hu-HU'));
+  }
+  async function cloudDeleteEntry(id){
+    const base = collection(db, 'entries');
+    await deleteDoc(doc(base, id));
+  }
+
+  // --- Eredeti függvények becsomagolása ---
+  // saveAll wrap
+  const __origSaveAll = window.saveAll;
+  window.saveAll = function(){
+    try{ __origSaveAll && __origSaveAll(); }catch(e){}
+    if(window.firebaseReady){ cloudPushAll().catch(console.warn); }
+  };
+  // addToList wrap
+  const __origAddToList = window.addToList;
+  window.addToList = function(kind, value){
+    try{ __origAddToList && __origAddToList(kind, value); }catch(e){}
+    if(window.firebaseReady){ cloudPushLists().catch(console.warn); }
+  };
+  // remove wrap
+  const __origRemove = window.remove;
+  window.remove = function(id){
+    try{ __origRemove && __origRemove(id); }catch(e){}
+    if(window.firebaseReady){ cloudDeleteEntry(id).catch(console.warn); }
+  };
+
+  // --- Anonim bejelentkezés és feliratkozások ---
+  signInAnonymously(auth);
+  onAuthStateChanged(auth, async (user) => {
+    if(!user){ setCloudStatus('Nincs bejelentkezve'); return; }
+    window.firebaseReady = true;
+    setCloudStatus('Bejelentkezve • szinkron aktív');
+
+    // Listák feliratkozás
+    const listsRef = doc(db, 'lists', 'laundry');
+    onSnapshot(listsRef, (snap)=>{
+      const data = snap.data() || {};
+      if(!data) return;
+      window._cloudApplying = true;
+      try{
+        if(Array.isArray(data.detergents)) window.detergents = data.detergents;
+        if(Array.isArray(data.softeners))  window.softeners  = data.softeners;
+        if(Array.isArray(data.programs))   window.programs   = data.programs;
+        if(typeof rebuildSelects === 'function') rebuildSelects();
+        if(typeof rebuildFilterOptions === 'function') rebuildFilterOptions();
+        if(typeof saveAll === 'function') __origSaveAll && __origSaveAll(); // helyi cache update, de push nélkül a guard miatt
+      } finally { window._cloudApplying = false; }
+    });
+
+    // Bejegyzések feliratkozás
+    const entriesRef = collection(db, 'entries');
+    const qy = query(entriesRef, orderBy('date','desc'));
+    onSnapshot(qy, (snap)=>{
+      const cloud = [];
+      snap.forEach(docSnap => cloud.push(docSnap.data()));
+      window._cloudApplying = true;
+      try{
+        window.entries = cloud;
+        if(typeof render === 'function') render();
+        if(typeof saveAll === 'function') __origSaveAll && __origSaveAll();
+      } finally { window._cloudApplying = false; }
+    });
+  });
+</script>
 </body>
 </html>
