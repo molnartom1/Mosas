@@ -1009,5 +1009,33 @@
     });
   });
 </script>
+
+
+<!-- Lebegő Diagnosztika gomb (mindig látszik) -->
+<style>
+  #diagFab{position:fixed;right:16px;bottom:16px;z-index:80;border:none;border-radius:999px;padding:12px 14px;cursor:pointer;font-weight:700;background:var(--accent);color:#0b1220;box-shadow:0 10px 28px rgba(0,0,0,.35)}
+  #diagFab:hover{transform:translateY(-1px)}
+</style>
+<button id="diagFab" title="Diagnosztika / Napló">🧪 Napló</button>
+<script>
+  (function(){
+    function toggleDiag(){
+      var card=document.getElementById('diagCard');
+      if(!card){
+        // ha valamiért nincs, hozzunk létre egy minimál panelt
+        var sec=document.createElement('section');
+        sec.className='card'; sec.id='diagCard';
+        sec.innerHTML='<strong>Diagnosztika – Cloud napló</strong><div id="cloudLog" style="max-height:220px; overflow:auto; background:var(--muted); border:1px solid var(--border); border-radius:10px; padding:8px; font-size:12px; line-height:1.4; white-space:pre-wrap"></div>';
+        document.querySelector('.container').appendChild(sec);
+      }
+      card=document.getElementById('diagCard');
+      card.style.display = (card.style.display==='none'||!card.style.display)?'block':'none';
+    }
+    var fab=document.getElementById('diagFab');
+    if(fab){ fab.addEventListener('click', toggleDiag); }
+    // Gyorsbillentyű: Alt+D
+    document.addEventListener('keydown', function(e){ if(e.altKey && (e.key==='d'||e.key==='D')) toggleDiag(); });
+  })();
+</script>
 </body>
 </html>
