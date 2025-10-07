@@ -886,20 +886,42 @@
 
     // ---- ELSŐ INDULÁSI SZINKRON ----
     try {
-      const entriesCol = collection(db, 'entries');
-      const entriesSnap = await getDocs(entriesCol);
-      if (entriesSnap.empty && Array.isArray(window.entries) && window.entries.length > 0) {
-        setCloudStatus('Felhő üres → első feltöltés…');
-        await cloudPushAll();
-      }
+      // 1) Listák egyszeri beolvasása és alkalmazása
       const listsRefInit = doc(db, 'lists', 'laundry');
       const listsDocInit = await getDoc(listsRefInit);
-      if (!listsDocInit.exists() && (
-            (window.detergents&&window.detergents.length) ||
-            (window.softeners&&window.softeners.length)  ||
-            (window.programs&&window.programs.length)
-          )) {
+      if (listsDocInit.exists()) {
+        const data = listsDocInit.data() || {};
+        window._cloudApplying = true;
+        try{
+          if(Array.isArray(data.detergents)) window.detergents = data.detergents;
+          if(Array.isArray(data.softeners))  window.softeners  = data.softeners;
+          if(Array.isArray(data.programs))   window.programs   = data.programs;
+          if(typeof window.rebuildSelects === 'function') window.rebuildSelects();
+          if(typeof window.rebuildFilterOptions === 'function') window.rebuildFilterOptions();
+          if(typeof __origSaveAll === 'function') __origSaveAll();
+        } finally { window._cloudApplying = false; }
+      } else if ((window.detergents&&window.detergents.length) || (window.softeners&&window.softeners.length) || (window.programs&&window.programs.length)) {
+        // ha nincs listák doksi, de van lokális adat → feltöltjük
         await cloudPushLists();
+      }
+
+      // 2) Bejegyzések egyszeri beolvasása és alkalmazása (mindig!)
+      const entriesRefOnce = collection(db, 'entries');
+      const qOnce = query(entriesRefOnce, orderBy('date','desc'));
+      const firstSnap = await getDocs(qOnce);
+      const firstCloud = [];
+      firstSnap.forEach(d=>firstCloud.push(d.data()));
+      window._cloudApplying = true;
+      try{
+        window.entries = firstCloud;
+        if(typeof window.render === 'function') window.render();
+        if(typeof __origSaveAll === 'function') __origSaveAll();
+      } finally { window._cloudApplying = false; }
+
+      // 3) Ha a felhő mégis üres, de lokál van → első feltöltés
+      if (firstCloud.length === 0 && Array.isArray(window.entries) && window.entries.length > 0) {
+        setCloudStatus('Felhő üres → első feltöltés…');
+        await cloudPushAll();
       }
     } catch (e) {
       console.warn('Initial sync check failed:', e);
