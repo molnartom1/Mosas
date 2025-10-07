@@ -753,7 +753,16 @@
     }
   </script>
 <script type="module">
+  // ===== Firebase + Firestore élő szinkron (stabil verzió) =====
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+  import {
+    getFirestore, enableIndexedDbPersistence,
+    collection, doc, setDoc, deleteDoc, onSnapshot,
+    query, orderBy, getDoc, getDocs
+  } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
+
+  // --- Konfiguráció ---
   const firebaseConfig = {
     apiKey: "AIzaSyAeoxtOe5Cleasm3KdeSHP9WDR3PkU-N1I",
     authDomain: "mosas-nyilvantartas.firebaseapp.com",
@@ -762,12 +771,18 @@
     messagingSenderId: "38259241645",
     appId: "1:38259241645:web:26070b1d0686def9f00c24"
   };
+
+  // --- Inicializálás ---
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db   = getFirestore(app);
-  // Debug mód URL param alapján (?debug=1)
+
+  // Debug mód: ?debug=1
   window._debugCloud = /[?&]debug=1/.test(location.search);
-  enableIndexedDbPersistence(db).catch((e)=>{ if(window._debugCloud) console.warn('IndexedDB persistence failed', e); });
+
+  enableIndexedDbPersistence(db).catch((e)=>{
+    if(window._debugCloud) console.warn('[CLOUD] IndexedDB persistence failed', e);
+  });
 
   // --- UI helper ---
   function setCloudStatus(msg){
@@ -775,11 +790,10 @@
     if(el){ el.textContent = msg; }
     if(window._debugCloud) console.log('[CLOUD]', msg);
   }
-  }
 
-  // --- Cloud sync guard ---
+  // --- Guardok ---
   window.firebaseReady = false;
-  window._cloudApplying = false; // ha felhőből érkezik frissítés, ne push-oljuk vissza
+  window._cloudApplying = false;
 
   // --- Felhő műveletek ---
   async function cloudPushLists(){
@@ -791,6 +805,7 @@
       programs:   Array.isArray(window.programs)?   window.programs   : []
     }, { merge: true });
   }
+
   async function cloudPushAll(){
     if(window._cloudApplying) return;
     await cloudPushLists();
@@ -799,53 +814,59 @@
     await Promise.all(list.map(e => setDoc(doc(base, e.id), e, { merge: true })));
     setCloudStatus('Mentve (felhő szinkron) ' + new Date().toLocaleTimeString('hu-HU'));
   }
+
   async function cloudDeleteEntry(id){
     const base = collection(db, 'entries');
     await deleteDoc(doc(base, id));
   }
 
   // --- Eredeti függvények becsomagolása ---
-  // saveAll wrap
-  const __origSaveAll = window.saveAll;
-  window.saveAll = function(){
-    try{ __origSaveAll && __origSaveAll(); }catch(e){}
-    if(window.firebaseReady){ cloudPushAll().catch(console.warn); }
-  };
-  // addToList wrap
-  const __origAddToList = window.addToList;
-  window.addToList = function(kind, value){
-    try{ __origAddToList && __origAddToList(kind, value); }catch(e){}
-    if(window.firebaseReady){ cloudPushLists().catch(console.warn); }
-  };
-  // remove wrap
-  const __origRemove = window.remove;
-  window.remove = function(id){
-    try{ __origRemove && __origRemove(id); }catch(e){}
-    if(window.firebaseReady){ cloudDeleteEntry(id).catch(console.warn); }
-  };
+  const __origSaveAll  = window.saveAll;
+  const __origAddToList= window.addToList;
+  const __origRemove   = window.remove;
 
-  // --- Anonim bejelentkezés és feliratkozások ---
-  // Jelentkezzünk be anonim módon és kezeljük a hibát
-signInAnonymously(auth).catch(err=>{
-  console.warn('Anon sign-in failed:', err);
-  setCloudStatus('Bejelentkezés hiba: '+ (err?.code||'ismeretlen'));
-});
+  if (typeof window.saveAll === 'function') {
+    window.saveAll = function(){
+      try{ __origSaveAll && __origSaveAll(); }catch(e){ console.warn(e); }
+      if(window.firebaseReady){ cloudPushAll().catch(console.warn); }
+    };
+  }
+
+  if (typeof window.addToList === 'function') {
+    window.addToList = function(kind, value){
+      try{ __origAddToList && __origAddToList(kind, value); }catch(e){ console.warn(e); }
+      if(window.firebaseReady){ cloudPushLists().catch(console.warn); }
+    };
+  }
+
+  if (typeof window.remove === 'function') {
+    window.remove = function(id){
+      try{ __origRemove && __origRemove(id); }catch(e){ console.warn(e); }
+      if(window.firebaseReady){ cloudDeleteEntry(id).catch(console.warn); }
+    };
+  }
+
+  // --- Bejelentkezés és feliratkozások ---
+  signInAnonymously(auth).catch(err=>{
+    console.warn('Anon sign-in failed:', err);
+    setCloudStatus('Bejelentkezés hiba: '+ (err?.code||'ismeretlen'));
+  });
+
   onAuthStateChanged(auth, async (user) => {
-    // Figyelmeztetés file:// originre
     if (location.protocol === 'file:') {
-      setCloudStatus('Figyelem: file:// alatt az Auth nem működik. Indítsd szerverről (pl. http://localhost).');
+      setCloudStatus('Figyelem: file:// alatt az Auth nem működik. Indítsd szerverről.');
     }
 
     if(!user){
-      setCloudStatus('Nincs bejelentkezve (ellenőrizd: Anonymous Auth engedélyezve-e, és a domain fel van-e véve).');
+      setCloudStatus('Nincs bejelentkezve (ellenőrizd az Anonymous Auth-ot és a domain-t).');
       return;
     }
+
     window.firebaseReady = true;
     setCloudStatus('Bejelentkezve • szinkron aktív');
 
     // ---- ELSŐ INDULÁSI SZINKRON ----
     try {
-      // Ha a felhő üres, de lokálban van adat, toljuk fel először
       const entriesCol = collection(db, 'entries');
       const entriesSnap = await getDocs(entriesCol);
       if (entriesSnap.empty && Array.isArray(window.entries) && window.entries.length > 0) {
@@ -854,7 +875,11 @@ signInAnonymously(auth).catch(err=>{
       }
       const listsRefInit = doc(db, 'lists', 'laundry');
       const listsDocInit = await getDoc(listsRefInit);
-      if (!listsDocInit.exists() && ( (window.detergents&&window.detergents.length) || (window.softeners&&window.softeners.length) || (window.programs&&window.programs.length) )) {
+      if (!listsDocInit.exists() && (
+            (window.detergents&&window.detergents.length) ||
+            (window.softeners&&window.softeners.length)  ||
+            (window.programs&&window.programs.length)
+          )) {
         await cloudPushLists();
       }
     } catch (e) {
@@ -870,8 +895,8 @@ signInAnonymously(auth).catch(err=>{
         if(Array.isArray(data.detergents)) window.detergents = data.detergents;
         if(Array.isArray(data.softeners))  window.softeners  = data.softeners;
         if(Array.isArray(data.programs))   window.programs   = data.programs;
-        if(typeof rebuildSelects === 'function') rebuildSelects();
-        if(typeof rebuildFilterOptions === 'function') rebuildFilterOptions();
+        if(typeof window.rebuildSelects === 'function') window.rebuildSelects();
+        if(typeof window.rebuildFilterOptions === 'function') window.rebuildFilterOptions();
         if(typeof __origSaveAll === 'function') __origSaveAll();
       } finally { window._cloudApplying = false; }
     });
@@ -885,38 +910,8 @@ signInAnonymously(auth).catch(err=>{
       window._cloudApplying = true;
       try{
         window.entries = cloud;
-        if(typeof render === 'function') render();
+        if(typeof window.render === 'function') window.render();
         if(typeof __origSaveAll === 'function') __origSaveAll();
-      } finally { window._cloudApplying = false; }
-    });
-  });
-
-    // Bejegyzések feliratkozás
-    const entriesRef = collection(db, 'entries');
-    const qy = query(entriesRef, orderBy('date','desc'));
-    onSnapshot(qy, (snap)=>{
-      const cloud = [];
-      snap.forEach(docSnap => cloud.push(docSnap.data()));
-      window._cloudApplying = true;
-      try{
-        window.entries = cloud;
-        if(typeof render === 'function') render();
-        if(typeof saveAll === 'function') __origSaveAll && __origSaveAll();
-      } finally { window._cloudApplying = false; }
-    });
-  });
-
-    // Bejegyzések feliratkozás
-    const entriesRef = collection(db, 'entries');
-    const qy = query(entriesRef, orderBy('date','desc'));
-    onSnapshot(qy, (snap)=>{
-      const cloud = [];
-      snap.forEach(docSnap => cloud.push(docSnap.data()));
-      window._cloudApplying = true;
-      try{
-        window.entries = cloud;
-        if(typeof render === 'function') render();
-        if(typeof saveAll === 'function') __origSaveAll && __origSaveAll();
       } finally { window._cloudApplying = false; }
     });
   });
