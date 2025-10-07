@@ -273,34 +273,9 @@
       </div>
       <div id="cloudLog" style="max-height:220px; overflow:auto; background:var(--muted); border:1px solid var(--border); border-radius:10px; padding:8px; font-size:12px; line-height:1.4; white-space:pre-wrap"></div>
     </section>
-
-    <!-- apró segéd gomb a fejlécbe -->
-    <script>
-      // kis gomb a fejlécbe: csak akkor látszik, ha ?debug=1
-      (function(){
-        const debug = /[?&]debug=1/.test(location.search);
-        const header = document.querySelector('header div');
-        if(header){
-          const btn = document.createElement('button');
-          btn.id = 'openLogBtn';
-          btn.className = 'muted';
-          btn.textContent = 'Napló';
-          btn.style.display = debug ? 'inline-block' : 'none';
-          btn.addEventListener('click', ()=>{
-            const card = document.getElementById('diagCard');
-            if(card){ card.style.display = card.style.display==='none'?'block':'none'; }
-          });
-          header.appendChild(btn);
-        }
-        if(debug){ const card = document.getElementById('diagCard'); if(card) card.style.display='block'; }
-        const clearBtn = document.getElementById('clearLogBtn');
-        clearBtn && clearBtn.addEventListener('click', ()=>{ const box=document.getElementById('cloudLog'); if(box) box.innerHTML=''; });
-        const hideBtn = document.getElementById('hideLogBtn');
-        hideBtn && hideBtn.addEventListener('click', ()=>{ const card=document.getElementById('diagCard'); if(card) card.style.display='none'; });
-      })();
-    </script>
   </div>
 
+  <!-- PIN MODAL -->
   <div id="pinModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
     <div class="modal-card">
       <h3 id="pinTitle">PIN szükséges</h3>
@@ -326,716 +301,132 @@
     </tr>
   </template>
 
+  <!-- Alkalmazás logika (lokális) -->
   <script>
-    // ----- Állandók és állapot -----
-    const DATA_KEY = 'laundry_simple_v9';
-    const DET_KEY  = 'laundry_detergents_v1';
-    const SOFT_KEY = 'laundry_softeners_v1';
-    const PROG_KEY = 'laundry_programs_v1';
-    const THEME_KEY= 'laundry_theme';
-    const SORT_KEY = 'laundry_sort_v1';
-    const PIN_KEY  = 'laundry_pin_v1';
-    const RUN_KEY  = 'laundry_running_v1';
-    const DEFAULT_PIN = '2024';
+    const DATA_KEY='laundry_simple_v9',DET_KEY='laundry_detergents_v1',SOFT_KEY='laundry_softeners_v1',PROG_KEY='laundry_programs_v1',THEME_KEY='laundry_theme',SORT_KEY='laundry_sort_v1',PIN_KEY='laundry_pin_v1',RUN_KEY='laundry_running_v1',DEFAULT_PIN='2024';
+    let entries=[],detergents=[],softeners=[],programs=[],editId=null,sortState={col:null,dir:1};
+    const $=s=>document.querySelector(s);
+    const uid=()=> 'e'+Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4);
+    const today=()=> new Date().toISOString().slice(0,10);
+    const safeParse=(j,f)=>{try{const v=JSON.parse(j);return v==null?f:v;}catch{return f;}};
 
-    let entries = [];
-    let detergents = [];
-    let softeners = [];
-    let programs = [];
-    let editId = null;
-    let sortState = { col:null, dir:1 };
+    function applyTheme(t){ t==='light'?document.documentElement.classList.add('light'):document.documentElement.classList.remove('light'); localStorage.setItem(THEME_KEY,t); }
+    function initTheme(){ const s=localStorage.getItem(THEME_KEY); if(s) applyTheme(s); else { const pref= matchMedia('(prefers-color-scheme: light)').matches; applyTheme(pref?'light':'dark'); }}
 
-    const $ = s => document.querySelector(s);
+    function saveAll(){ localStorage.setItem(DATA_KEY,JSON.stringify(entries)); localStorage.setItem(DET_KEY,JSON.stringify(detergents)); localStorage.setItem(SOFT_KEY,JSON.stringify(softeners)); localStorage.setItem(PROG_KEY,JSON.stringify(programs)); localStorage.setItem(SORT_KEY,JSON.stringify(sortState)); const st=$('#autosaveStatus'); if(st) st.textContent='Mentve '+new Date().toLocaleTimeString('hu-HU'); }
+    function loadAll(){ entries=safeParse(localStorage.getItem(DATA_KEY),[]); detergents=safeParse(localStorage.getItem(DET_KEY),['Ariel','Persil','OMO','Tommy']); softeners=safeParse(localStorage.getItem(SOFT_KEY),['Lenor','Silan','Softlan','Nincs']); programs=safeParse(localStorage.getItem(PROG_KEY),['ECO 40-60','GYAPJÚ/KÉZI',"GYORS 14'","GYORS 30'","GYORS 44'",'KÖNNYŰ VASALÁS PLUSZ','MŰSZÁL ÉS SZÍNES','ÖBLÍTÉS','PAMUT',"SPECIAL 39'","TÖKÉLETES PAMUT 59'","VEGYES ÉS SZÍNES 59'"].sort((a,b)=>a.localeCompare(b,'hu'))); sortState=safeParse(localStorage.getItem(SORT_KEY),{col:null,dir:1}); rebuildSelects(); rebuildFilterOptions(); updateStats(); render(); }
 
-    function uid(){return 'e'+Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4)}
-    function today(){return new Date().toISOString().slice(0,10)}
-    function currentPIN(){ return localStorage.getItem(PIN_KEY) || DEFAULT_PIN; }
-    function safeParse(json, fallback){ try{ const v = JSON.parse(json); return v==null?fallback:v; } catch{ return fallback; } }
+    function rebuildSelects(){const d=$('#detergent'),s=$('#softener'),p=$('#program'); d.innerHTML=''; s.innerHTML=''; p.innerHTML=''; detergents.forEach(v=>{const o=document.createElement('option');o.value=o.textContent=v;d.appendChild(o)}); softeners.forEach(v=>{const o=document.createElement('option');o.value=o.textContent=v;s.appendChild(o)}); programs.forEach(v=>{const o=document.createElement('option');o.value=o.textContent=v;p.appendChild(o)}); if(detergents[0]) d.value=d.value||detergents[0]; if(softeners[0]) s.value=s.value||softeners[0]; if(programs[0]) p.value=p.value||programs[0]; }
 
-    // ----- Téma -----
-    function applyTheme(theme){
-      if(theme==='light') document.documentElement.classList.add('light');
-      else document.documentElement.classList.remove('light');
-      localStorage.setItem(THEME_KEY, theme);
-      $('#themeToggle').textContent = theme==='light' ? '🌞' : '🌙';
-    }
-    function initTheme(){
-      const saved = localStorage.getItem(THEME_KEY);
-      if(saved){ applyTheme(saved); }
-      else {
-        const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-        applyTheme(prefersLight ? 'light' : 'dark');
-        const mq = window.matchMedia('(prefers-color-scheme: light)');
-        mq.addEventListener && mq.addEventListener('change', e=>{
-          if(!localStorage.getItem(THEME_KEY)) applyTheme(e.matches ? 'light' : 'dark');
-        });
-      }
-    }
+    function rebuildFilterOptions(){ const persons=[...new Set(entries.map(e=>e.person).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'hu')); const sel=$('#personFilter'); if(sel) sel.innerHTML='<option value="">(Mind)</option>'+persons.map(p=>`<option>${p}</option>`).join(''); const dl=$('#personsDatalist'); if(dl) dl.innerHTML=persons.map(p=>`<option value="${p}">`).join(''); const progSel=$('#programFilter'); if(progSel) progSel.innerHTML='<option value="">(Mind)</option>'+programs.map(p=>`<option>${p}</option>`).join(''); }
 
-    // ----- Mentés / Betöltés -----
-    function saveAll(){
-      localStorage.setItem(DATA_KEY, JSON.stringify(entries));
-      localStorage.setItem(DET_KEY, JSON.stringify(detergents));
-      localStorage.setItem(SOFT_KEY, JSON.stringify(softeners));
-      localStorage.setItem(PROG_KEY, JSON.stringify(programs));
-      localStorage.setItem(SORT_KEY, JSON.stringify(sortState));
-      $('#autosaveStatus').textContent='Mentve '+new Date().toLocaleTimeString('hu-HU');
-    }
-    function loadAll(){
-      entries    = safeParse(localStorage.getItem(DATA_KEY), []);
-      detergents = safeParse(localStorage.getItem(DET_KEY), ['Ariel','Persil','OMO','Tommy']);
-      softeners  = safeParse(localStorage.getItem(SOFT_KEY), ['Lenor','Silan','Softlan','Nincs']);
-      programs   = safeParse(localStorage.getItem(PROG_KEY), [
-        'ECO 40-60', 'GYAPJÚ/KÉZI', "GYORS 14'", "GYORS 30'", "GYORS 44'",
-        'KÖNNYŰ VASALÁS PLUSZ', 'MŰSZÁL ÉS SZÍNES', 'ÖBLÍTÉS', 'PAMUT', "SPECIAL 39'", "TÖKÉLETES PAMUT 59'", "VEGYES ÉS SZÍNES 59'"
-      ].sort((a,b)=>a.localeCompare(b,'hu')));
-      sortState  = safeParse(localStorage.getItem(SORT_KEY), {col:null,dir:1});
-      rebuildSelects();
-      rebuildFilterOptions();
-      updateStats();
-      render();
-    }
+    function getFilters(){return{q:($('#searchQ').value||'').toLowerCase(),from:$('#fromDate').value||'',to:$('#toDate').value||'',person:$('#personFilter').value||'',program:$('#programFilter').value||'',dry:$('#dryFilter').value||''};}
+    function passFilters(e,f){ if(f.from&&e.date<f.from)return false; if(f.to&&e.date>f.to)return false; if(f.person&&e.person!==f.person)return false; if(f.program&&e.program!==f.program)return false; if(f.dry&&e.dry!==f.dry)return false; if(f.q){const hay=[e.person,e.item,e.program,e.detergent,e.softener,e.color,String(e.qty)].join(' ').toLowerCase(); if(!hay.includes(f.q)) return false;} return true; }
+    function attachFilterEvents(){['searchQ','fromDate','toDate','personFilter','programFilter','dryFilter'].forEach(id=>{const el=document.getElementById(id); el&&el.addEventListener('input',render); el&&el.addEventListener('change',render);}); document.getElementById('resetFilters').addEventListener('click',()=>{['searchQ','fromDate','toDate'].forEach(id=>document.getElementById(id).value=''); ['personFilter','programFilter','dryFilter'].forEach(id=>document.getElementById(id).value=''); render();});}
 
-    // ----- Selectek -----
-    function rebuildSelects(){
-      const detSel = $('#detergent');
-      const sofSel = $('#softener');
-      const progSel = $('#program');
-      detSel.innerHTML = ''; sofSel.innerHTML=''; progSel.innerHTML='';
-      for(const v of detergents){ const o=document.createElement('option'); o.textContent=v; o.value=v; detSel.appendChild(o); }
-      for(const v of softeners){ const o=document.createElement('option'); o.textContent=v; o.value=v; sofSel.appendChild(o); }
-      for(const v of programs){ const o=document.createElement('option'); o.textContent=v; o.value=v; progSel.appendChild(o); }
-      if(detergents[0]) detSel.value = detSel.value || detergents[0];
-      if(softeners[0])  sofSel.value = sofSel.value || softeners[0];
-      if(programs[0])   progSel.value = progSel.value || programs[0];
-    }
+    function compareValues(a,b,type){ if(type==='date')return a.localeCompare(b); if(type==='qty')return (Number(a)||0)-(Number(b)||0); return a.localeCompare(b,'hu'); }
+    function iconFor(p){const s=(p||'').toLowerCase(); if(s.includes('pamut'))return'👕'; if(s.includes('gyors'))return'⏱️'; if(s.includes('eco'))return'🍃'; if(s.includes('gyapjú')||s.includes('kézi'))return'🐑'; if(s.includes('műszál')||s.includes('színes'))return'🧵'; if(s.includes('öblítés'))return'💧'; if(s.includes('vegyes'))return'🎛️'; if(s.includes('special'))return'⭐'; return'🧺'; }
 
-    // ----- Szűrők -----
-    function rebuildFilterOptions(){
-      const persons = Array.from(new Set(entries.map(e=>e.person).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'hu'));
-      const personSel = $('#personFilter');
-      personSel.innerHTML = '<option value="">(Mind)</option>' + persons.map(p=>`<option>${p}</option>`).join('');
-      const dl = document.getElementById('personsDatalist');
-      if(dl){ dl.innerHTML = persons.map(p=>`<option value="${p}">`).join(''); }
+    const PROGRAM_MIN={"ECO 40-60":180,"PAMUT":150,"TÖKÉLETES PAMUT":59,"GYORS 14'":14,"GYORS 30'":30,"GYORS 44'":44,"GYAPJÚ":60,"GYAPJÚ/KÉZI":60,"MŰSZÁL ÉS SZÍNES":75,"ÖBLÍTÉS":20,"SPECIAL 39'":39,"VEGYES ÉS SZÍNES 59'":59};
+    let timer=null,running=null;
+    function guessMinutes(program){const custom=Number(document.getElementById('customMin')?.value||0); if(custom>0)return Math.min(240,Math.max(1,Math.floor(custom))); const name=(program||'').toUpperCase(); for(const k of Object.keys(PROGRAM_MIN)){ if(name.includes(k)) return PROGRAM_MIN[k]; } const m=name.match(/(\d{1,3})\s*['’]?/); if(m) return Math.max(5,Number(m[1])); return 60;}
+    const formatMS=ms=>{const t=Math.max(0,Math.floor(ms/1000)); const m=Math.floor(t/60), s=t%60; return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; };
+    function updateTimerUI(){const bar=$('#progBar'),label=$('#timerLabel'),sub=$('#timerSub'); if(!bar||!label||!sub)return; if(!running){bar.style.width='0%';bar.className='';label.textContent='Nincs aktív program';sub.textContent='';return;} label.textContent=`${iconFor(running.program)} ${running.program}`; const total=running.minutes*60*1000; const done=Math.min(total,Math.max(0,Date.now()-running.start)); const pct=Math.round((done/total)*100); bar.style.width=pct+'%'; bar.className=pct<70?'ok':(pct<90?'warn':'danger'); const remain=running.end-Date.now(); const endTime=new Date(running.end).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'}); sub.textContent=`Hátralévő: ${formatMS(remain)} • Vége: ${endTime}`; }
+    function tickTimer(){ if(timer)clearInterval(timer); timer=setInterval(()=>{ updateTimerUI(); if(running && Date.now()>=running.end){ onTimerDone(); } },1000); updateTimerUI(); }
+    function startTimerFor(id){const e=entries.find(x=>x.id===id); if(!e){showToast('Nincs kijelölt bejegyzés');return;} const minutes=guessMinutes(e.program); const start=Date.now(), end=start+minutes*60*1000; running={id:e.id,program:e.program,minutes,start,end}; localStorage.setItem(RUN_KEY,JSON.stringify(running)); tickTimer(); $('#stopTimerBtn').disabled=false; requestNotify(); showToast('Visszaszámláló elindítva ('+minutes+' perc)'); }
+    function stopTimer(){ if(timer)clearInterval(timer); timer=null; running=null; localStorage.removeItem(RUN_KEY); updateTimerUI(); $('#stopTimerBtn').disabled=true; showToast('Visszaszámláló leállítva'); }
+    function onTimerDone(){ if(timer){clearInterval(timer); timer=null;} notify('Mosás kész', `${running.program} befejeződött.`); chime(); showToast('⏰ Program lejárt'); running=null; localStorage.removeItem(RUN_KEY); updateTimerUI(); $('#stopTimerBtn').disabled=true; }
 
-      const progSel = $('#programFilter');
-      progSel.innerHTML = '<option value="">(Mind)</option>' + programs.map(p=>`<option>${p}</option>`).join('');
-    }
+    function showToast(msg){const wrap=$('#toastWrap'); const el=document.createElement('div'); el.className='toast'; el.textContent=msg; wrap.appendChild(el); setTimeout(()=>{el.style.opacity='0'; el.style.transition='opacity .4s';},2000); setTimeout(()=>el.remove(),2600);}
+    function requestNotify(){ if('Notification' in window && Notification.permission==='default') Notification.requestPermission(); }
+    function notify(t,b){ try{ if('Notification' in window && Notification.permission==='granted'){ new Notification(t,{body:b}); } }catch(_){} }
+    function chime(){ try{ const ctx=new (window.AudioContext||window.webkitAudioContext)(); const o=ctx.createOscillator(); const g=ctx.createGain(); o.type='sine'; o.frequency.value=880; o.connect(g); g.connect(ctx.destination); g.gain.value=0.001; o.start(); const n=ctx.currentTime; g.gain.exponentialRampToValueAtTime(0.2,n+0.05); g.gain.exponentialRampToValueAtTime(0.0001,n+0.8); o.stop(n+0.9);}catch(_){} }
 
-    function getFilters(){
-      return {
-        q: ($('#searchQ').value||'').toLowerCase(),
-        from: $('#fromDate').value || '',
-        to: $('#toDate').value || '',
-        person: $('#personFilter').value || '',
-        program: $('#programFilter').value || '',
-        dry: $('#dryFilter').value || ''
-      };
-    }
-
-    function passFilters(e, f){
-      if(f.from && e.date < f.from) return false;
-      if(f.to   && e.date > f.to)   return false;
-      if(f.person && e.person !== f.person) return false;
-      if(f.program && e.program !== f.program) return false;
-      if(f.dry && e.dry !== f.dry) return false;
-      if(f.q){
-        const hay = [e.person,e.item,e.program,e.detergent,e.softener,e.color,String(e.qty)].join(' ').toLowerCase();
-        if(!hay.includes(f.q)) return false;
-      }
-      return true;
-    }
-
-    function attachFilterEvents(){
-      ['searchQ','fromDate','toDate','personFilter','programFilter','dryFilter'].forEach(id=>{
-        const el = document.getElementById(id);
-        el && el.addEventListener('input', render);
-        el && el.addEventListener('change', render);
-      });
-      document.getElementById('resetFilters').addEventListener('click', ()=>{
-        ['searchQ','fromDate','toDate'].forEach(id=>document.getElementById(id).value='');
-        ['personFilter','programFilter','dryFilter'].forEach(id=>document.getElementById(id).value='');
-        render();
-      });
-    }
-
-    // ----- Rendezés -----
-    function compareValues(a,b,type){
-      if(type==='date'){ return a.localeCompare(b); }
-      if(type==='qty'){ return (Number(a)||0) - (Number(b)||0); }
-      return a.localeCompare(b,'hu');
-    }
-
-    // ----- Program ikonok -----
-    function iconFor(p){
-      const s = (p||'').toLowerCase();
-      if(s.includes('pamut')) return '👕';
-      if(s.includes('gyors')) return '⏱️';
-      if(s.includes('eco')) return '🍃';
-      if(s.includes('gyapjú')||s.includes('kézi')) return '🐑';
-      if(s.includes('műszál')||s.includes('színes')) return '🧵';
-      if(s.includes('öblítés')) return '💧';
-      if(s.includes('vegye')||s.includes('vegyes')) return '🎛️';
-      if(s.includes('special')) return '⭐';
-      return '🧺';
-    }
-
-    // ----- Visszaszámláló / Progress -----
-    const PROGRAM_MIN = {
-      "ECO 40-60": 180,
-      "PAMUT": 150,
-      "TÖKÉLETES PAMUT": 59,
-      "GYORS 14'": 14,
-      "GYORS 30'": 30,
-      "GYORS 44'": 44,
-      "GYAPJÚ": 60,
-      "GYAPJÚ/KÉZI": 60,
-      "MŰSZÁL ÉS SZÍNES": 75,
-      "ÖBLÍTÉS": 20,
-      "SPECIAL 39'": 39,
-      "VEGYES ÉS SZÍNES 59'": 59
-    };
-    let timer = null;
-    let running = null; // {id, start, end, program, minutes}
-
-    function guessMinutes(program){
-      const custom = Number(document.getElementById('customMin')?.value||0);
-      if(custom && custom>0) return Math.min(240, Math.max(1, Math.floor(custom)));
-      const name = (program||'').toUpperCase();
-      for(const k of Object.keys(PROGRAM_MIN)){
-        if(name.includes(k)) return PROGRAM_MIN[k];
-      }
-      const m = name.match(/(\d{1,3})\s*['’]?/);
-      if(m) return Math.max(5, Number(m[1]));
-      return 60; // alapértelmezett
-    }
-
-    function loadRunning(){ running = safeParse(localStorage.getItem(RUN_KEY), null); if(running){ tickTimer(true); enableTimerButtons(true); } }
-    function saveRunning(){ localStorage.setItem(RUN_KEY, JSON.stringify(running)); }
-    function clearRunning(){ running=null; localStorage.removeItem(RUN_KEY); updateTimerUI(); enableTimerButtons(false); }
-
-    function enableTimerButtons(active){
-      const stopBtn = document.getElementById('stopTimerBtn'); if(stopBtn) stopBtn.disabled = !active;
-    }
-
-    function startTimerFor(id){
-      const e = entries.find(x=>x.id===id);
-      if(!e){ showToast('Nincs kijelölt bejegyzés'); return; }
-      const minutes = guessMinutes(e.program);
-      const start = Date.now();
-      const end = start + minutes*60*1000;
-      running = { id:e.id, program:e.program, minutes, start, end };
-      saveRunning();
-      updateTimerUI();
-      tickTimer(true);
-      enableTimerButtons(true);
-      requestNotify();
-      showToast('Visszaszámláló elindítva ('+minutes+' perc)');
-    }
-
-    function stopTimer(){ if(timer) clearInterval(timer); timer=null; clearRunning(); showToast('Visszaszámláló leállítva'); }
-
-    function formatMS(ms){ const t=Math.max(0,Math.floor(ms/1000)); const m=Math.floor(t/60); const s=t%60; return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
-
-    function updateTimerUI(){
-      const bar = document.getElementById('progBar');
-      const label = document.getElementById('timerLabel');
-      const sub = document.getElementById('timerSub');
-      if(!bar||!label||!sub) return;
-      if(!running){ bar.style.width='0%'; bar.className=''; label.textContent='Nincs aktív program'; sub.textContent=''; return; }
-      label.textContent = `${iconFor(running.program)} ${running.program}`;
-      const total = running.minutes*60*1000; const done = Math.min(total, Math.max(0, Date.now()-running.start));
-      const pct = Math.round((done/total)*100);
-      bar.style.width = pct+'%';
-      bar.className = pct<70? 'ok' : (pct<90? 'warn' : 'danger');
-      const remain = running.end - Date.now();
-      const endTime = new Date(running.end).toLocaleTimeString('hu-HU',{hour:'2-digit',minute:'2-digit'});
-      sub.textContent = `Hátralévő: ${formatMS(remain)} • Vége: ${endTime}`;
-    }
-
-    function tickTimer(immediate){
-      if(timer) clearInterval(timer);
-      updateTimerUI();
-      timer = setInterval(()=>{
-        updateTimerUI();
-        if(running && Date.now()>=running.end){ onTimerDone(); }
-      }, 1000);
-      if(immediate) updateTimerUI();
-    }
-
-    function onTimerDone(){
-      if(timer) { clearInterval(timer); timer=null; }
-      notify('Mosás kész', `${running.program} befejeződött.`);
-      chime();
-      showToast('⏰ Program lejárt');
-      clearRunning();
-    }
-
-    // ----- Toast -----
-    function showToast(msg){
-      const wrap = document.getElementById('toastWrap');
-      const el = document.createElement('div');
-      el.className='toast';
-      el.textContent=msg;
-      wrap.appendChild(el);
-      setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .4s'; }, 2000);
-      setTimeout(()=>{ el.remove(); }, 2600);
-    }
-
-    // ----- Értesítés + hang -----
-    function requestNotify(){ if('Notification' in window && Notification.permission==='default'){ Notification.requestPermission(); } }
-    function notify(title,body){ try{ if('Notification' in window && Notification.permission==='granted'){ new Notification(title,{body}); } }catch(_){} }
-    function chime(){ try{ const ctx=new (window.AudioContext||window.webkitAudioContext)(); const o=ctx.createOscillator(); const g=ctx.createGain(); o.type='sine'; o.frequency.value=880; o.connect(g); g.connect(ctx.destination); g.gain.value=0.001; o.start(); const now=ctx.currentTime; g.gain.exponentialRampToValueAtTime(0.2, now+0.05); g.gain.exponentialRampToValueAtTime(0.0001, now+0.8); o.stop(now+0.9);}catch(_){} }
-
-    // ----- CRUD -----
-    function addToList(kind, value){
-      value = (value||'').trim();
-      if(!value) return;
-      if(kind==='det'){ if(!detergents.includes(value)) detergents.push(value); $('#detergent').value=value; $('#detergentNew').value=''; }
-      if(kind==='sof'){ if(!softeners.includes(value)) softeners.push(value); $('#softener').value=value; $('#softenerNew').value=''; }
-      if(kind==='prog'){ if(!programs.includes(value)) programs.push(value); programs.sort((a,b)=>a.localeCompare(b,'hu')); $('#program').value=value; $('#programNew').value=''; rebuildFilterOptions(); }
-      saveAll(); rebuildSelects();
-    }
-
-    function readForm(){
-      return {
-        id:editId||uid(),
-        date:$('#date').value||today(),
-        person:$('#person').value.trim(),
-        machine:'CANDY RPW 4856BWR8',
-        program:$('#program').value,
-        temp:$('#temp').value,
-        spin:$('#spin').value,
-        color:$('#color').value,
-        qty:Math.max(1, Number($('#qty').value||1)),
-        item:$('#item').value.trim(),
-        dry:document.querySelector('input[name="dry"]:checked').value,
-        detergent:$('#detergent').value,
-        softener:$('#softener').value
-      }
-    }
-
-    function writeForm(e){
-      $('#date').value=e.date; $('#person').value=e.person; $('#program').value=e.program; $('#temp').value=e.temp; $('#spin').value=e.spin; $('#color').value=e.color; $('#qty').value=e.qty; $('#item').value=e.item;
-      if(e.dry==='Igen'){ document.getElementById('dryYes').checked=true; } else { document.getElementById('dryNo').checked=true; }
-      if(e.detergent){ if(detergents.includes(e.detergent)) $('#detergent').value=e.detergent; else addToList('det', e.detergent); }
-      if(e.softener){ if(softeners.includes(e.softener)) $('#softener').value=e.softener; else addToList('sof', e.softener); }
-      if(e.program){ if(programs.includes(e.program)) $('#program').value=e.program; else addToList('prog', e.program); }
-    }
-
+    function addToList(kind,value){value=(value||'').trim(); if(!value)return; if(kind==='det'){if(!detergents.includes(value))detergents.push(value); $('#detergent').value=value; $('#detergentNew').value='';} if(kind==='sof'){if(!softeners.includes(value))softeners.push(value); $('#softener').value=value; $('#softenerNew').value='';} if(kind==='prog'){if(!programs.includes(value))programs.push(value); programs.sort((a,b)=>a.localeCompare(b,'hu')); $('#program').value=value; $('#programNew').value=''; rebuildFilterOptions();} saveAll(); rebuildSelects(); }
+    function readForm(){return{ id:editId||uid(), date:$('#date').value||today(), person:$('#person').value.trim(), machine:'CANDY RPW 4856BWR8', program:$('#program').value, temp:$('#temp').value, spin:$('#spin').value, color:$('#color').value, qty:Math.max(1,Number($('#qty').value||1)), item:$('#item').value.trim(), dry:document.querySelector('input[name="dry"]:checked').value, detergent:$('#detergent').value, softener:$('#softener').value } }
+    function writeForm(e){ $('#date').value=e.date; $('#person').value=e.person; $('#program').value=e.program; $('#temp').value=e.temp; $('#spin').value=e.spin; $('#color').value=e.color; $('#qty').value=e.qty; $('#item').value=e.item; (e.dry==='Igen'?document.getElementById('dryYes'):document.getElementById('dryNo')).checked=true; if(e.detergent){ if(detergents.includes(e.detergent)) $('#detergent').value=e.detergent; else addToList('det',e.detergent);} if(e.softener){ if(softeners.includes(e.softener)) $('#softener').value=e.softener; else addToList('sof',e.softener);} if(e.program){ if(programs.includes(e.program)) $('#program').value=e.program; else addToList('prog',e.program);} }
     function clearForm(){ editId=null; $('#washForm').reset(); $('#date').value=today(); $('#qty').value=1; $('#saveBtn').textContent='Hozzáadás'; $('#deleteBtn').disabled=true; rebuildSelects(); const st=document.getElementById('startTimerBtn'); if(st) st.disabled=true; }
     function upsert(e){ const i=entries.findIndex(x=>x.id===e.id); if(i>-1) entries[i]=e; else entries.unshift(e); saveAll(); rebuildFilterOptions(); render(); }
-    function remove(id){ entries = entries.filter(e=>e.id!==id); saveAll(); rebuildFilterOptions(); render(); }
+    function remove(id){ entries=entries.filter(e=>e.id!==id); saveAll(); rebuildFilterOptions(); render(); }
 
-    // ----- Render + stat -----
-    function render(){
-      const tb=$('#tableBody'); tb.innerHTML='';
-      const f = getFilters();
-      let filtered = entries.filter(e=>passFilters(e,f));
+    function render(){ const tb=$('#tableBody'); tb.innerHTML=''; const f=getFilters(); let filtered=entries.filter(e=>passFilters(e,f)); if(sortState.col){ const type=sortState.col==='date'?'date':(sortState.col==='qty'?'qty':'text'); filtered=filtered.slice().sort((x,y)=>compareValues(String(x[sortState.col]||''),String(y[sortState.col]||''),type)*(sortState.dir||1)); } for(const e of filtered){ const row=$('#rowTemplate').content.firstElementChild.cloneNode(true); row.dataset.id=e.id; row.querySelector('[data-col=date]').textContent=e.date; row.querySelector('[data-col=person]').textContent=e.person; row.querySelector('[data-col=item]').textContent=e.item; row.querySelector('[data-col=qty]').textContent=e.qty; row.querySelector('[data-col=machine]').textContent=e.machine; row.querySelector('[data-col=program]').textContent=iconFor(e.program)+' '+e.program; row.querySelector('[data-col=details]').textContent=`${e.temp||'-'}°C / ${e.spin||'-'}rpm / ${e.color||'-'} / Szárítás: ${e.dry} / Mosószer: ${e.detergent||'-'} / Öblítő: ${e.softener||'-'}`; tb.appendChild(row); } document.getElementById('emptyState').style.display=filtered.length?'none':'block'; document.querySelectorAll('th.sortable').forEach(th=>{ th.classList.remove('asc','desc'); if(sortState.col===th.dataset.sort) th.classList.add(sortState.dir===1?'asc':'desc'); }); const st=document.getElementById('startTimerBtn'); if(st) st.disabled=!editId; updateStats(filtered); }
+    function updateStats(list){ const arr=Array.isArray(list)?list:entries; const loads=arr.length, items=arr.reduce((s,e)=>s+(+e.qty||0),0); const ci=document.getElementById('countInfo'); if(ci) ci.textContent=loads?`${loads} mosás • ${items} darab`:''; const stats=document.getElementById('stats'); if(stats) stats.textContent=loads?`Összesen: ${loads} mosás, ${items} darab (szűrés szerint)`:''; }
 
-      if(sortState.col){
-        const type = sortState.col==='date' ? 'date' : (sortState.col==='qty' ? 'qty' : 'text');
-        filtered = filtered.slice().sort((x,y)=>{
-          const res = compareValues(String(x[sortState.col]||''), String(y[sortState.col]||''), type);
-          return res * (sortState.dir||1);
-        });
-      }
+    function openPinModal(){ return new Promise(resolve=>{ const m=$('#pinModal'),i=$('#pinInput'),err=$('#pinError'),ok=$('#pinOk'),cc=$('#pinCancel'); err.textContent=''; i.value=''; m.style.display='grid'; setTimeout(()=>i.focus(),50); function close(){m.style.display='none'; ok.removeEventListener('click',onOk); cc.removeEventListener('click',onCancel); i.removeEventListener('keydown',onKey);} function onOk(){ const p=i.value.trim(); if(p===(localStorage.getItem(PIN_KEY)||'2024')){close();resolve(true);} else {err.textContent='Hibás PIN.'; i.select();}} function onCancel(){close();resolve(false);} function onKey(e){ if(e.key==='Enter') onOk(); if(e.key==='Escape') onCancel(); } ok.addEventListener('click',onOk); cc.addEventListener('click',onCancel); i.addEventListener('keydown',onKey); }); }
 
-      for(const e of filtered){
-        const row = $('#rowTemplate').content.firstElementChild.cloneNode(true);
-        row.dataset.id=e.id;
-        row.querySelector('[data-col=date]').textContent=e.date;
-        row.querySelector('[data-col=person]').textContent=e.person;
-        row.querySelector('[data-col=item]').textContent=e.item;
-        row.querySelector('[data-col=qty]').textContent=e.qty;
-        row.querySelector('[data-col=machine]').textContent=e.machine;
-        row.querySelector('[data-col=program]').textContent=iconFor(e.program)+" "+e.program;
-        row.querySelector('[data-col=details]').textContent=`${e.temp||'-'}°C / ${e.spin||'-'}rpm / ${e.color||'-'} / Szárítás: ${e.dry} / Mosószer: ${e.detergent||'-'} / Öblítő: ${e.softener||'-'}`;
-        tb.appendChild(row);
-      }
-      document.getElementById('emptyState').style.display = filtered.length? 'none':'block';
-
-      document.querySelectorAll('th.sortable').forEach(th=>{
-        th.classList.remove('asc','desc');
-        if(sortState.col===th.dataset.sort) th.classList.add(sortState.dir===1?'asc':'desc');
-      });
-
-      const st = document.getElementById('startTimerBtn'); if(st) st.disabled = !editId;
-      updateStats(filtered);
-    }
-
-    function updateStats(list){
-      const arr = Array.isArray(list)? list : entries;
-      const totalLoads = arr.length;
-      const totalItems = arr.reduce((s,e)=>s+(Number(e.qty)||0),0);
-      const countInfo = document.getElementById('countInfo');
-      if(countInfo) countInfo.textContent = totalLoads ? `${totalLoads} mosás • ${totalItems} darab` : '';
-      const stats = document.getElementById('stats');
-      if(stats) stats.textContent = totalLoads ? `Összesen: ${totalLoads} mosás, ${totalItems} darab (szűrés szerint)` : '';
-    }
-
-    // ----- PIN modal -----
-    function openPinModal(){
-      return new Promise(resolve=>{
-        const modal = $('#pinModal');
-        const input = $('#pinInput');
-        const err   = $('#pinError');
-        const okBtn = $('#pinOk');
-        const cancelBtn = $('#pinCancel');
-        err.textContent=''; input.value='';
-        modal.style.display = 'grid';
-        setTimeout(()=>input.focus(), 50);
-        function close(){ modal.style.display = 'none'; okBtn.removeEventListener('click',onOk); cancelBtn.removeEventListener('click',onCancel); input.removeEventListener('keydown',onKey); }
-        function onOk(){ const entered = input.value.trim(); if(entered === currentPIN()){ close(); resolve(true);} else { err.textContent='Hibás PIN.'; input.select(); } }
-        function onCancel(){ close(); resolve(false); }
-        function onKey(e){ if(e.key==='Enter') onOk(); if(e.key==='Escape') onCancel(); }
-        okBtn.addEventListener('click', onOk); cancelBtn.addEventListener('click', onCancel); input.addEventListener('keydown', onKey);
-      });
-    }
-
-    // ----- Események -----
     document.addEventListener('DOMContentLoaded',()=>{
       initTheme();
-      $('#themeToggle').addEventListener('click',()=>{
-        const isLight = document.documentElement.classList.contains('light');
-        applyTheme(isLight ? 'dark' : 'light');
-      });
-
-      $('#date').value = today();
+      document.getElementById('themeToggle').onclick=()=>{ const light=document.documentElement.classList.contains('light'); applyTheme(light?'dark':'light'); };
+      document.getElementById('date').value=today();
       loadAll();
-
-      const img = document.getElementById('machinePhoto');
-      img.onerror = () => { img.style.display='none'; };
-
-      $('#washForm').addEventListener('submit', ev=>{
-        ev.preventDefault();
-        const e = readForm();
-        if(!e.person || !e.item){ alert('A "Személy" és a "Tétel(ek)" kötelező.'); return; }
-        upsert(e); clearForm(); showToast('Bejegyzés mentve');
-      });
-
-      document.addEventListener('keydown', async (ev)=>{
-        if((ev.ctrlKey || ev.metaKey) && ev.key==='Enter'){ ev.preventDefault(); $('#washForm').dispatchEvent(new Event('submit')); }
-        if(ev.key==='Escape'){ clearForm(); }
-        if(ev.key==='Delete' && editId){ const ok = await openPinModal(); if(ok){ remove(editId); clearForm(); showToast('Bejegyzés törölve'); } }
-      });
-
-      $('#resetBtn').addEventListener('click', ()=>{ clearForm(); showToast('Űrlap törölve'); });
-
-      $('#deleteBtn').addEventListener('click', async ()=>{
-        if(!editId) return;
-        const ok = await openPinModal();
-        if(ok){ remove(editId); clearForm(); showToast('Bejegyzés törölve'); }
-      });
-
-      $('#tableBody').addEventListener('click', ev=>{
-        const tr = ev.target.closest('tr'); if(!tr) return;
-        [...$('#tableBody').children].forEach(r=>r.classList.remove('selected'));
-        tr.classList.add('selected');
-        editId = tr.dataset.id; const e = entries.find(x=>x.id===editId); if(!e) return;
-        writeForm(e); $('#saveBtn').textContent='Frissítés'; $('#deleteBtn').disabled=false; window.scrollTo({top:0,behavior:'smooth'});
-        const st = document.getElementById('startTimerBtn'); if(st) st.disabled = false;
-      });
-
-      $('#detergentAdd').addEventListener('click', ()=> { addToList('det', $('#detergentNew').value); showToast('Mosószer hozzáadva'); });
-      $('#softenerAdd').addEventListener('click', ()=> { addToList('sof', $('#softenerNew').value); showToast('Öblítő hozzáadva'); });
-      $('#programAdd').addEventListener('click', ()=> { addToList('prog', $('#programNew').value); showToast('Program hozzáadva'); });
-
-      $('#exportAll').addEventListener('click', ()=>{ exportAll(); showToast('Exportálva'); });
-      $('#importAll').addEventListener('change', e=>{ const f=e.target.files[0]; if(f) importAll(f); e.target.value=''; });
-
+      const img=document.getElementById('machinePhoto'); img.onerror=()=>{img.style.display='none'};
+      document.getElementById('washForm').addEventListener('submit',ev=>{ev.preventDefault(); const e=readForm(); if(!e.person||!e.item){alert('A "Személy" és a "Tétel(ek)" kötelező.');return;} upsert(e); clearForm(); showToast('Bejegyzés mentve');});
+      document.addEventListener('keydown',async ev=>{ if((ev.ctrlKey||ev.metaKey)&&ev.key==='Enter'){ev.preventDefault(); document.getElementById('washForm').dispatchEvent(new Event('submit'));} if(ev.key==='Escape') clearForm(); if(ev.key==='Delete'&&editId){ const ok=await openPinModal(); if(ok){ remove(editId); clearForm(); showToast('Bejegyzés törölve'); }} });
+      document.getElementById('resetBtn').onclick=()=>{ clearForm(); showToast('Űrlap törölve'); };
+      document.getElementById('deleteBtn').onclick=async()=>{ if(!editId)return; const ok=await openPinModal(); if(ok){ remove(editId); clearForm(); showToast('Bejegyzés törölve'); }};
+      document.getElementById('tableBody').addEventListener('click',ev=>{ const tr=ev.target.closest('tr'); if(!tr)return; [...document.getElementById('tableBody').children].forEach(r=>r.classList.remove('selected')); tr.classList.add('selected'); editId=tr.dataset.id; const e=entries.find(x=>x.id===editId); if(!e)return; writeForm(e); document.getElementById('saveBtn').textContent='Frissítés'; document.getElementById('deleteBtn').disabled=false; window.scrollTo({top:0,behavior:'smooth'}); const st=document.getElementById('startTimerBtn'); if(st) st.disabled=false; });
+      document.getElementById('detergentAdd').onclick=()=>{ addToList('det',document.getElementById('detergentNew').value); showToast('Mosószer hozzáadva'); };
+      document.getElementById('softenerAdd').onclick=()=>{ addToList('sof',document.getElementById('softenerNew').value); showToast('Öblítő hozzáadva'); };
+      document.getElementById('programAdd').onclick=()=>{ addToList('prog',document.getElementById('programNew').value); showToast('Program hozzáadva'); };
+      document.getElementById('exportAll').onclick=()=>{ exportAll(); showToast('Exportálva'); };
+      document.getElementById('importAll').addEventListener('change',e=>{ const f=e.target.files[0]; if(f) importAll(f); e.target.value=''; });
       attachFilterEvents();
-
-      document.querySelectorAll('th.sortable').forEach(th=>{
-        th.addEventListener('click',()=>{
-          const col = th.dataset.sort;
-          if(sortState.col===col){ sortState.dir*=-1; }
-          else { sortState.col=col; sortState.dir=1; }
-          localStorage.setItem(SORT_KEY, JSON.stringify(sortState));
-          render();
-        });
-      });
-
-      // Visszaszámláló gombok
-      loadRunning();
-      document.getElementById('startTimerBtn').addEventListener('click', ()=>{ if(editId) startTimerFor(editId); else showToast('Jelölj ki egy sort!'); });
-      document.getElementById('stopTimerBtn').addEventListener('click', stopTimer);
+      document.querySelectorAll('th.sortable').forEach(th=>{ th.addEventListener('click',()=>{ const col=th.dataset.sort; if(sortState.col===col) sortState.dir*=-1; else {sortState.col=col; sortState.dir=1;} localStorage.setItem(SORT_KEY,JSON.stringify(sortState)); render(); }); });
+      const run=localStorage.getItem(RUN_KEY); if(run){ try{ running=JSON.parse(run); $('#stopTimerBtn').disabled=false; tickTimer(); }catch{} }
+      document.getElementById('startTimerBtn').onclick=()=>{ if(editId) startTimerFor(editId); else showToast('Jelölj ki egy sort!'); };
+      document.getElementById('stopTimerBtn').onclick=stopTimer;
       requestNotify();
     });
 
-    // ----- Export / Import -----
-    function exportAll(){
-      const payload = { entries, detergents, softeners, programs, exportedAt: new Date().toISOString() };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `mosas_adatok_${new Date().toISOString().slice(0,10)}.json`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
-    }
-    function importAll(file){
-      const reader = new FileReader();
-      reader.onload = () => {
-        try{
-          const data = JSON.parse(reader.result);
-          if(!data || typeof data !== 'object') throw new Error('Érvénytelen fájl');
-          if(Array.isArray(data.entries)) entries = data.entries; 
-          if(Array.isArray(data.detergents)) detergents = data.detergents;
-          if(Array.isArray(data.softeners)) softeners = data.softeners;
-          if(Array.isArray(data.programs)) programs = data.programs;
-          saveAll(); rebuildSelects(); rebuildFilterOptions(); render();
-          showToast('Import kész!');
-        }catch(err){ alert('Import hiba: '+err.message); }
-      };
-      reader.readAsText(file);
-    }
+    function exportAll(){ const payload={entries,detergents,softeners,programs,exportedAt:new Date().toISOString()}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`mosas_adatok_${new Date().toISOString().slice(0,10)}.json`; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+    function importAll(file){ const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); if(Array.isArray(data.entries)) entries=data.entries; if(Array.isArray(data.detergents)) detergents=data.detergents; if(Array.isArray(data.softeners)) softeners=data.softeners; if(Array.isArray(data.programs)) programs=data.programs; saveAll(); rebuildSelects(); rebuildFilterOptions(); render(); showToast('Import kész!'); }catch(err){ alert('Import hiba: '+err.message);} }; r.readAsText(file); }
   </script>
-<script type="module">
-  // ===== Firebase + Firestore élő szinkron (stabil verzió) =====
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
-  import {
-    getFirestore, enableIndexedDbPersistence,
-    collection, doc, setDoc, deleteDoc, onSnapshot,
-    query, orderBy, getDoc, getDocs
-  } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
 
-  // --- Konfiguráció ---
-  const firebaseConfig = {
-    apiKey: "AIzaSyAeoxtOe5Cleasm3KdeSHP9WDR3PkU-N1I",
-    authDomain: "mosas-nyilvantartas.firebaseapp.com",
-    projectId: "mosas-nyilvantartas",
-    storageBucket: "mosas-nyilvantartas.firebasestorage.app",
-    messagingSenderId: "38259241645",
-    appId: "1:38259241645:web:26070b1d0686def9f00c24"
-  };
+  <!-- Firebase + Firestore (javított) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
+    import { getFirestore, enableIndexedDbPersistence, collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDoc, getDocs } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
 
-  // --- Inicializálás ---
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db   = getFirestore(app);
+    const firebaseConfig={ apiKey:"AIzaSyAeoxtOe5Cleasm3KdeSHP9WDR3PkU-N1I", authDomain:"mosas-nyilvantartas.firebaseapp.com", projectId:"mosas-nyilvantartas", storageBucket:"mosas-nyilvantartas.firebasestorage.app", messagingSenderId:"38259241645", appId:"1:38259241645:web:26070b1d0686def9f00c24" };
+    const app=initializeApp(firebaseConfig); const auth=getAuth(app); const db=getFirestore(app);
+    window._debugCloud=/[?&]debug=1\b/.test(location.search);
+    enableIndexedDbPersistence(db).catch(()=>{});
 
-  // Debug mód: ?debug=1
-  window._debugCloud = /[?&]debug=1/.test(location.search);
+    function clog(m){ const box=document.getElementById('cloudLog'); if(box){ const t=new Date().toLocaleTimeString('hu-HU'); const d=document.createElement('div'); d.textContent=`[${t}] ${m}`; box.appendChild(d); box.scrollTop=box.scrollHeight; if(box.children.length>200)box.removeChild(box.firstChild);} if(window._debugCloud) console.log('[CLOUD]',m); }
+    function setStatus(m){ const el=document.getElementById('autosaveStatus'); if(el) el.textContent=m; clog(m); }
 
-  enableIndexedDbPersistence(db).catch((e)=>{
-    if(window._debugCloud) console.warn('[CLOUD] IndexedDB persistence failed', e);
-  });
+    window.firebaseReady=false; window._cloudApplying=false;
 
-  // --- UI helper ---
-  function setCloudStatus(msg){
-    const el = document.getElementById('autosaveStatus');
-    if(el){ el.textContent = msg; }
-    cloudLog(msg);
-    cloudLog(, msg);
-  }
-  function cloudLog(msg){
-    try{
-      const box = document.getElementById('cloudLog');
-      if(!box) return;
-      const time = new Date().toLocaleTimeString('hu-HU');
-      const line = document.createElement('div');
-      line.textContent = `[${time}] ${msg}`;
-      box.appendChild(line);
-      // limit 200 sor
-      while(box.children.length>200){ box.removeChild(box.firstChild); }
-      box.scrollTop = box.scrollHeight;
-    }catch(e){/* ignore */}
-  }
+    async function cloudPushLists(){ await setDoc(doc(db,'lists','laundry'),{detergents,softeners,programs},{merge:true}); clog('push lists'); }
+    async function cloudUpsertEntry(e){ await setDoc(doc(collection(db,'entries'),e.id),e,{merge:true}); clog('upsert '+e.id); }
+    async function cloudDeleteEntry(id){ await deleteDoc(doc(db,'entries',id)); clog('delete '+id); }
+    async function cloudPushAll(){ await cloudPushLists(); const arr=entries||[]; await Promise.all(arr.map(e=>setDoc(doc(collection(db,'entries'),e.id),e,{merge:true}))); setStatus('Mentve (felhő szinkron) '+new Date().toLocaleTimeString('hu-HU')); }
 
-  // --- Guardok ---
-  window.firebaseReady = false;
-  window._cloudApplying = false;
+    // wrapek
+    const oSave=window.saveAll, oAdd=window.addToList, oRem=window.remove, oUp=window.upsert;
+    window.saveAll=function(){ oSave&&oSave(); if(window.firebaseReady) cloudPushAll(); }
+    window.addToList=function(k,v){ oAdd&&oAdd(k,v); if(window.firebaseReady) cloudPushLists(); }
+    window.remove=function(id){ oRem&&oRem(id); if(window.firebaseReady) cloudDeleteEntry(id); }
+    window.upsert=function(e){ oUp&&oUp(e); if(window.firebaseReady) cloudUpsertEntry(e); }
 
-  // --- Felhő műveletek ---
-  async function cloudPushLists(){
-    if(window._cloudApplying) return;
-    const listsRef = doc(db, 'lists', 'laundry');
-    if(window._debugCloud) cloudLog( push lists');
-    await setDoc(listsRef, {
-      detergents: Array.isArray(window.detergents)? window.detergents : [],
-      softeners:  Array.isArray(window.softeners)?  window.softeners  : [],
-      programs:   Array.isArray(window.programs)?   window.programs   : []
-    }, { merge: true });
-  }
+    signInAnonymously(auth).catch(e=>setStatus('Bejelentkezés hiba: '+(e.code||e)));
 
-  async function cloudUpsertEntry(e){
-    if(window._cloudApplying || !e || !e.id) return;
-    const base = collection(db, 'entries');
-    if(window._debugCloud) cloudLog( upsert entry', e.id);
-    await setDoc(doc(base, e.id), e, { merge: true });
-  }
-
-  async function cloudPushAll(){
-    if(window._cloudApplying) return;
-    await cloudPushLists();
-    const base = collection(db, 'entries');
-    const list = Array.isArray(window.entries)? window.entries : [];
-    if(window._debugCloud) cloudLog( bulk push', list.length);
-    await Promise.all(list.map(e => setDoc(doc(base, e.id), e, { merge: true }));
-    setCloudStatus('Mentve (felhő szinkron) ' + new Date().toLocaleTimeString('hu-HU'));
-  }
-
-  async function cloudDeleteEntry(id){
-    const base = collection(db, 'entries');
-    if(window._debugCloud) cloudLog( delete', id);
-    await deleteDoc(doc(base, id));
-  }
-
-  // --- Eredeti függvények becsomagolása ---
-  const __origSaveAll  = window.saveAll;
-  const __origAddToList= window.addToList;
-  const __origRemove   = window.remove;
-
-  if (typeof window.saveAll === 'function') {
-    window.saveAll = function(){
-      try{ __origSaveAll && __origSaveAll(); }catch(e){ console.warn(e); }
-      if(window.firebaseReady){ cloudPushAll().catch(console.warn); }
-    };
-  }
-
-  if (typeof window.addToList === 'function') {
-    window.addToList = function(kind, value){
-      try{ __origAddToList && __origAddToList(kind, value); }catch(e){ console.warn(e); }
-      if(window.firebaseReady){ cloudPushLists().catch(console.warn); }
-    };
-  }
-
-  if (typeof window.remove === 'function') {
-    window.remove = function(id){
-      try{ __origRemove && __origRemove(id); }catch(e){ console.warn(e); }
-      if(window.firebaseReady){ cloudDeleteEntry(id).catch(console.warn); }
-    };
-  }
-
-  // upsert wrap (single entry push)
-  const __origUpsert = window.upsert;
-  if (typeof window.upsert === 'function') {
-    window.upsert = function(e){
-      try{ __origUpsert && __origUpsert(e); }catch(err){ console.warn(err); }
-      if(window.firebaseReady){ cloudUpsertEntry(e).catch(console.warn); }
-    };
-  }
-
-  // --- Bejelentkezés és feliratkozások ---
-  signInAnonymously(auth).catch(err=>{
-    console.warn('Anon sign-in failed:', err);
-    setCloudStatus('Bejelentkezés hiba: '+ (err?.code||'ismeretlen'));
-  });
-
-  onAuthStateChanged(auth, async (user) => {
-    if (location.protocol === 'file:') {
-      setCloudStatus('Figyelem: file:// alatt az Auth nem működik. Indítsd szerverről.');
-    }
-
-    if(!user){
-      setCloudStatus('Nincs bejelentkezve (ellenőrizd az Anonymous Auth-ot és a domain-t).');
-      return;
-    }
-
-    window.firebaseReady = true;
-    setCloudStatus('Bejelentkezve • szinkron aktív');
-
-    // ---- ELSŐ INDULÁSI SZINKRON ----
-    try {
-      // 1) Listák egyszeri beolvasása és alkalmazása
-      const listsRefInit = doc(db, 'lists', 'laundry');
-      const listsDocInit = await getDoc(listsRefInit);
-      if (listsDocInit.exists()) {
-        const data = listsDocInit.data() || {};
-        window._cloudApplying = true;
-        try{
-          if(Array.isArray(data.detergents)) window.detergents = data.detergents;
-          if(Array.isArray(data.softeners))  window.softeners  = data.softeners;
-          if(Array.isArray(data.programs))   window.programs   = data.programs;
-          if(typeof window.rebuildSelects === 'function') window.rebuildSelects();
-          if(typeof window.rebuildFilterOptions === 'function') window.rebuildFilterOptions();
-          if(typeof __origSaveAll === 'function') __origSaveAll();
-        } finally { window._cloudApplying = false; }
-      } else if ((window.detergents&&window.detergents.length) || (window.softeners&&window.softeners.length) || (window.programs&&window.programs.length)) {
-        // ha nincs listák doksi, de van lokális adat → feltöltjük
-        await cloudPushLists();
-      }
-
-      // 2) Bejegyzések egyszeri beolvasása és alkalmazása (mindig!)
-      const entriesRefOnce = collection(db, 'entries');
-      const qOnce = query(entriesRefOnce, orderBy('date','desc'));
-      const firstSnap = await getDocs(qOnce);
-      const firstCloud = [];
-      firstSnap.forEach(d=>firstCloud.push(d.data()));
-      window._cloudApplying = true;
+    onAuthStateChanged(auth, async (user)=>{
+      if(!user){ setStatus('Nincs bejelentkezve'); return; }
+      window.firebaseReady=true; setStatus('Bejelentkezve • szinkron aktív');
       try{
-        window.entries = firstCloud;
-        if(typeof window.render === 'function') window.render();
-        if(typeof __origSaveAll === 'function') __origSaveAll();
-      } finally { window._cloudApplying = false; }
-
-      // 3) Ha a felhő mégis üres, de lokál van → első feltöltés
-      if (firstCloud.length === 0 && Array.isArray(window.entries) && window.entries.length > 0) {
-        setCloudStatus('Felhő üres → első feltöltés…');
-        await cloudPushAll();
-      }
-    } catch (e) {
-      console.warn('Initial sync check failed:', e);
-    }
-
-    // Listák feliratkozás
-    const listsRef = doc(db, 'lists', 'laundry');
-    onSnapshot(listsRef, (snap)=>{
-      const data = snap.data() || {};
-      window._cloudApplying = true;
-      try{
-        if(Array.isArray(data.detergents)) window.detergents = data.detergents;
-        if(Array.isArray(data.softeners))  window.softeners  = data.softeners;
-        if(Array.isArray(data.programs))   window.programs   = data.programs;
-        if(typeof window.rebuildSelects === 'function') window.rebuildSelects();
-        if(typeof window.rebuildFilterOptions === 'function') window.rebuildFilterOptions();
-        if(typeof __origSaveAll === 'function') __origSaveAll();
-      } finally { window._cloudApplying = false; }
+        const lref=doc(db,'lists','laundry'); const ldoc=await getDoc(lref); if(ldoc.exists()){ const d=ldoc.data()||{}; window._cloudApplying=true; detergents=d.detergents||detergents; softeners=d.softeners||softeners; programs=d.programs||programs; window.rebuildSelects&&window.rebuildSelects(); window.rebuildFilterOptions&&window.rebuildFilterOptions(); window.saveAll&&window.saveAll(); window._cloudApplying=false; } else { await cloudPushLists(); }
+        const qy=query(collection(db,'entries'),orderBy('date','desc')); const fs=await getDocs(qy); const arr=[]; fs.forEach(s=>arr.push(s.data())); window._cloudApplying=true; entries=arr; window.render&&window.render(); window.saveAll&&window.saveAll(); window._cloudApplying=false;
+        onSnapshot(lref,(snap)=>{ const d=snap.data()||{}; window._cloudApplying=true; detergents=d.detergents||detergents; softeners=d.softeners||softeners; programs=d.programs||programs; window.rebuildSelects&&window.rebuildSelects(); window.rebuildFilterOptions&&window.rebuildFilterOptions(); window.saveAll&&window.saveAll(); window._cloudApplying=false; });
+        onSnapshot(qy,(snap)=>{ const cloud=[]; snap.forEach(s=>cloud.push(s.data())); window._cloudApplying=true; entries=cloud; window.render&&window.render(); window.saveAll&&window.saveAll(); window._cloudApplying=false; clog('snapshot entries '+cloud.length); });
+      }catch(e){ clog('sync error '+(e.code||e)); }
     });
+  </script>
 
-    // Bejegyzések feliratkozás
-    const entriesRef = collection(db, 'entries');
-    const qy = query(entriesRef, orderBy('date','desc'));
-    onSnapshot(qy, (snap)=>{
-      const cloud = [];
-      snap.forEach(docSnap => cloud.push(docSnap.data()));
-      window._cloudApplying = true;
-      try{
-        window.entries = cloud;
-        if(typeof window.render === 'function') window.render();
-        if(typeof __origSaveAll === 'function') __origSaveAll();
-      } finally { window._cloudApplying = false; }
-    });
-  });
-</script>
-
-
-<!-- Lebegő Diagnosztika gomb (mindig látszik) -->
-<style>
-  #diagFab{position:fixed;right:16px;bottom:16px;z-index:80;border:none;border-radius:999px;padding:12px 14px;cursor:pointer;font-weight:700;background:var(--accent);color:#0b1220;box-shadow:0 10px 28px rgba(0,0,0,.35)}
-  #diagFab:hover{transform:translateY(-1px)}
-</style>
-<button id="diagFab" title="Diagnosztika / Napló">🧪 Napló</button>
-<script>
-  (function(){
-    function toggleDiag(){
-      var card=document.getElementById('diagCard');
-      if(!card){
-        // ha valamiért nincs, hozzunk létre egy minimál panelt
-        var sec=document.createElement('section');
-        sec.className='card'; sec.id='diagCard';
-        sec.innerHTML='<strong>Diagnosztika – Cloud napló</strong><div id="cloudLog" style="max-height:220px; overflow:auto; background:var(--muted); border:1px solid var(--border); border-radius:10px; padding:8px; font-size:12px; line-height:1.4; white-space:pre-wrap"></div>';
-        document.querySelector('.container').appendChild(sec);
-      }
-      card=document.getElementById('diagCard');
-      card.style.display = (card.style.display==='none'||!card.style.display)?'block':'none';
-    }
-    var fab=document.getElementById('diagFab');
-    if(fab){ fab.addEventListener('click', toggleDiag); }
-    // Gyorsbillentyű: Alt+D
-    document.addEventListener('keydown', function(e){ if(e.altKey && (e.key==='d'||e.key==='D')) toggleDiag(); });
-  })();
-</script>
+  <!-- Lebegő Napló gomb -->
+  <style>#diagFab{position:fixed;right:16px;bottom:16px;z-index:80;border:none;border-radius:999px;padding:12px 14px;cursor:pointer;font-weight:700;background:var(--accent);color:#0b1220;box-shadow:0 10px 28px rgba(0,0,0,.35)} #diagFab:hover{transform:translateY(-1px)}</style>
+  <button id="diagFab" title="Diagnosztika / Napló">🧪 Napló</button>
+  <script>(function(){ function t(){var c=document.getElementById('diagCard'); if(c) c.style.display=(c.style.display==='none'||!c.style.display)?'block':'none'; } document.getElementById('diagFab').onclick=t; document.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='d'||e.key==='D')) t(); }); })();</script>
 </body>
 </html>
