@@ -799,6 +799,7 @@
   async function cloudPushLists(){
     if(window._cloudApplying) return;
     const listsRef = doc(db, 'lists', 'laundry');
+    if(window._debugCloud) console.log('[CLOUD] push lists');
     await setDoc(listsRef, {
       detergents: Array.isArray(window.detergents)? window.detergents : [],
       softeners:  Array.isArray(window.softeners)?  window.softeners  : [],
@@ -806,17 +807,26 @@
     }, { merge: true });
   }
 
+  async function cloudUpsertEntry(e){
+    if(window._cloudApplying || !e || !e.id) return;
+    const base = collection(db, 'entries');
+    if(window._debugCloud) console.log('[CLOUD] upsert entry', e.id);
+    await setDoc(doc(base, e.id), e, { merge: true });
+  }
+
   async function cloudPushAll(){
     if(window._cloudApplying) return;
     await cloudPushLists();
     const base = collection(db, 'entries');
     const list = Array.isArray(window.entries)? window.entries : [];
+    if(window._debugCloud) console.log('[CLOUD] bulk push', list.length);
     await Promise.all(list.map(e => setDoc(doc(base, e.id), e, { merge: true })));
     setCloudStatus('Mentve (felhő szinkron) ' + new Date().toLocaleTimeString('hu-HU'));
   }
 
   async function cloudDeleteEntry(id){
     const base = collection(db, 'entries');
+    if(window._debugCloud) console.log('[CLOUD] delete', id);
     await deleteDoc(doc(base, id));
   }
 
@@ -843,6 +853,15 @@
     window.remove = function(id){
       try{ __origRemove && __origRemove(id); }catch(e){ console.warn(e); }
       if(window.firebaseReady){ cloudDeleteEntry(id).catch(console.warn); }
+    };
+  }
+
+  // upsert wrap (single entry push)
+  const __origUpsert = window.upsert;
+  if (typeof window.upsert === 'function') {
+    window.upsert = function(e){
+      try{ __origUpsert && __origUpsert(e); }catch(err){ console.warn(err); }
+      if(window.firebaseReady){ cloudUpsertEntry(e).catch(console.warn); }
     };
   }
 
