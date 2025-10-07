@@ -763,37 +763,18 @@
     appId: "1:38259241645:web:26070b1d0686def9f00c24"
   };
   const app = initializeApp(firebaseConfig);
-</script>
-
-<!-- Firebase + Firestore élő szinkron -->
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-app.js";
-  import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
-  import { 
-    getFirestore, enableIndexedDbPersistence,
-    collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy
-  } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-firestore.js";
-
-  // --- Konfiguráció ---
-  const firebaseConfig = {
-    apiKey: "AIzaSyAeoxtOe5Cleasm3KdeSHP9WDR3PkU-N1I",
-    authDomain: "mosas-nyilvantartas.firebaseapp.com",
-    projectId: "mosas-nyilvantartas",
-    storageBucket: "mosas-nyilvantartas.firebasestorage.app",
-    messagingSenderId: "38259241645",
-    appId: "1:38259241645:web:26070b1d0686def9f00c24"
-  };
-
-  // --- Inicializálás ---
-  const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db   = getFirestore(app);
-  enableIndexedDbPersistence(db).catch(()=>{});
+  // Debug mód URL param alapján (?debug=1)
+  window._debugCloud = /[?&]debug=1/.test(location.search);
+  enableIndexedDbPersistence(db).catch((e)=>{ if(window._debugCloud) console.warn('IndexedDB persistence failed', e); });
 
   // --- UI helper ---
   function setCloudStatus(msg){
     const el = document.getElementById('autosaveStatus');
     if(el){ el.textContent = msg; }
+    if(window._debugCloud) console.log('[CLOUD]', msg);
+  }
   }
 
   // --- Cloud sync guard ---
@@ -844,17 +825,46 @@
   };
 
   // --- Anonim bejelentkezés és feliratkozások ---
-  signInAnonymously(auth);
+  // Jelentkezzünk be anonim módon és kezeljük a hibát
+signInAnonymously(auth).catch(err=>{
+  console.warn('Anon sign-in failed:', err);
+  setCloudStatus('Bejelentkezés hiba: '+ (err?.code||'ismeretlen'));
+});
   onAuthStateChanged(auth, async (user) => {
-    if(!user){ setCloudStatus('Nincs bejelentkezve'); return; }
+    // Figyelmeztetés file:// originre
+    if (location.protocol === 'file:') {
+      setCloudStatus('Figyelem: file:// alatt az Auth nem működik. Indítsd szerverről (pl. http://localhost).');
+    }
+
+    if(!user){
+      setCloudStatus('Nincs bejelentkezve (ellenőrizd: Anonymous Auth engedélyezve-e, és a domain fel van-e véve).');
+      return;
+    }
     window.firebaseReady = true;
     setCloudStatus('Bejelentkezve • szinkron aktív');
+
+    // ---- ELSŐ INDULÁSI SZINKRON ----
+    try {
+      // Ha a felhő üres, de lokálban van adat, toljuk fel először
+      const entriesCol = collection(db, 'entries');
+      const entriesSnap = await getDocs(entriesCol);
+      if (entriesSnap.empty && Array.isArray(window.entries) && window.entries.length > 0) {
+        setCloudStatus('Felhő üres → első feltöltés…');
+        await cloudPushAll();
+      }
+      const listsRefInit = doc(db, 'lists', 'laundry');
+      const listsDocInit = await getDoc(listsRefInit);
+      if (!listsDocInit.exists() && ( (window.detergents&&window.detergents.length) || (window.softeners&&window.softeners.length) || (window.programs&&window.programs.length) )) {
+        await cloudPushLists();
+      }
+    } catch (e) {
+      console.warn('Initial sync check failed:', e);
+    }
 
     // Listák feliratkozás
     const listsRef = doc(db, 'lists', 'laundry');
     onSnapshot(listsRef, (snap)=>{
       const data = snap.data() || {};
-      if(!data) return;
       window._cloudApplying = true;
       try{
         if(Array.isArray(data.detergents)) window.detergents = data.detergents;
@@ -862,9 +872,39 @@
         if(Array.isArray(data.programs))   window.programs   = data.programs;
         if(typeof rebuildSelects === 'function') rebuildSelects();
         if(typeof rebuildFilterOptions === 'function') rebuildFilterOptions();
-        if(typeof saveAll === 'function') __origSaveAll && __origSaveAll(); // helyi cache update, de push nélkül a guard miatt
+        if(typeof __origSaveAll === 'function') __origSaveAll();
       } finally { window._cloudApplying = false; }
     });
+
+    // Bejegyzések feliratkozás
+    const entriesRef = collection(db, 'entries');
+    const qy = query(entriesRef, orderBy('date','desc'));
+    onSnapshot(qy, (snap)=>{
+      const cloud = [];
+      snap.forEach(docSnap => cloud.push(docSnap.data()));
+      window._cloudApplying = true;
+      try{
+        window.entries = cloud;
+        if(typeof render === 'function') render();
+        if(typeof __origSaveAll === 'function') __origSaveAll();
+      } finally { window._cloudApplying = false; }
+    });
+  });
+
+    // Bejegyzések feliratkozás
+    const entriesRef = collection(db, 'entries');
+    const qy = query(entriesRef, orderBy('date','desc'));
+    onSnapshot(qy, (snap)=>{
+      const cloud = [];
+      snap.forEach(docSnap => cloud.push(docSnap.data()));
+      window._cloudApplying = true;
+      try{
+        window.entries = cloud;
+        if(typeof render === 'function') render();
+        if(typeof saveAll === 'function') __origSaveAll && __origSaveAll();
+      } finally { window._cloudApplying = false; }
+    });
+  });
 
     // Bejegyzések feliratkozás
     const entriesRef = collection(db, 'entries');
