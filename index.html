@@ -261,6 +261,44 @@
       </table>
       <div id="emptyState" style="opacity:.8;margin-top:8px;display:none">Nincs találat a beállított szűrőkre.</div>
     </section>
+
+    <!-- DIAGNOSZTIKA / CLOUD NAPLÓ -->
+    <section class="card" id="diagCard" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+        <strong>Diagnosztika – Cloud napló</strong>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button type="button" class="muted" id="clearLogBtn">Napló törlése</button>
+          <button type="button" class="muted" id="hideLogBtn">Elrejt</button>
+        </div>
+      </div>
+      <div id="cloudLog" style="max-height:220px; overflow:auto; background:var(--muted); border:1px solid var(--border); border-radius:10px; padding:8px; font-size:12px; line-height:1.4; white-space:pre-wrap"></div>
+    </section>
+
+    <!-- apró segéd gomb a fejlécbe -->
+    <script>
+      // kis gomb a fejlécbe: csak akkor látszik, ha ?debug=1
+      (function(){
+        const debug = /[?&]debug=1/.test(location.search);
+        const header = document.querySelector('header div');
+        if(header){
+          const btn = document.createElement('button');
+          btn.id = 'openLogBtn';
+          btn.className = 'muted';
+          btn.textContent = 'Napló';
+          btn.style.display = debug ? 'inline-block' : 'none';
+          btn.addEventListener('click', ()=>{
+            const card = document.getElementById('diagCard');
+            if(card){ card.style.display = card.style.display==='none'?'block':'none'; }
+          });
+          header.appendChild(btn);
+        }
+        if(debug){ const card = document.getElementById('diagCard'); if(card) card.style.display='block'; }
+        const clearBtn = document.getElementById('clearLogBtn');
+        clearBtn && clearBtn.addEventListener('click', ()=>{ const box=document.getElementById('cloudLog'); if(box) box.innerHTML=''; });
+        const hideBtn = document.getElementById('hideLogBtn');
+        hideBtn && hideBtn.addEventListener('click', ()=>{ const card=document.getElementById('diagCard'); if(card) card.style.display='none'; });
+      })();
+    </script>
   </div>
 
   <div id="pinModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pinTitle">
@@ -788,7 +826,21 @@
   function setCloudStatus(msg){
     const el = document.getElementById('autosaveStatus');
     if(el){ el.textContent = msg; }
-    if(window._debugCloud) console.log('[CLOUD]', msg);
+    cloudLog(msg);
+    cloudLog(, msg);
+  }
+  function cloudLog(msg){
+    try{
+      const box = document.getElementById('cloudLog');
+      if(!box) return;
+      const time = new Date().toLocaleTimeString('hu-HU');
+      const line = document.createElement('div');
+      line.textContent = `[${time}] ${msg}`;
+      box.appendChild(line);
+      // limit 200 sor
+      while(box.children.length>200){ box.removeChild(box.firstChild); }
+      box.scrollTop = box.scrollHeight;
+    }catch(e){/* ignore */}
   }
 
   // --- Guardok ---
@@ -799,7 +851,7 @@
   async function cloudPushLists(){
     if(window._cloudApplying) return;
     const listsRef = doc(db, 'lists', 'laundry');
-    if(window._debugCloud) console.log('[CLOUD] push lists');
+    if(window._debugCloud) cloudLog( push lists');
     await setDoc(listsRef, {
       detergents: Array.isArray(window.detergents)? window.detergents : [],
       softeners:  Array.isArray(window.softeners)?  window.softeners  : [],
@@ -810,7 +862,7 @@
   async function cloudUpsertEntry(e){
     if(window._cloudApplying || !e || !e.id) return;
     const base = collection(db, 'entries');
-    if(window._debugCloud) console.log('[CLOUD] upsert entry', e.id);
+    if(window._debugCloud) cloudLog( upsert entry', e.id);
     await setDoc(doc(base, e.id), e, { merge: true });
   }
 
@@ -819,14 +871,14 @@
     await cloudPushLists();
     const base = collection(db, 'entries');
     const list = Array.isArray(window.entries)? window.entries : [];
-    if(window._debugCloud) console.log('[CLOUD] bulk push', list.length);
-    await Promise.all(list.map(e => setDoc(doc(base, e.id), e, { merge: true })));
+    if(window._debugCloud) cloudLog( bulk push', list.length);
+    await Promise.all(list.map(e => setDoc(doc(base, e.id), e, { merge: true }));
     setCloudStatus('Mentve (felhő szinkron) ' + new Date().toLocaleTimeString('hu-HU'));
   }
 
   async function cloudDeleteEntry(id){
     const base = collection(db, 'entries');
-    if(window._debugCloud) console.log('[CLOUD] delete', id);
+    if(window._debugCloud) cloudLog( delete', id);
     await deleteDoc(doc(base, id));
   }
 
