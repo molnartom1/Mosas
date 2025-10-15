@@ -47,7 +47,20 @@
     .hint{font-size:12px;opacity:.8}
     .error{color:#fecaca;font-size:13px;min-height:18px}
     .machine-info{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-    .machine-info img{width:140px;max-height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--border);background:#fff}
+    ..machine-info img {
+  width: 100%;
+  max-width: 280px;
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  transition: transform .3s;
+}
+.machine-info img:hover {
+  transform: scale(1.05);
+}
     .link-btn{display:inline-block;text-decoration:none;padding:8px 12px;border-radius:10px}
     .filters{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
     .filters .col-2{grid-column:span 2}
