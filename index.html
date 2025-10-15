@@ -85,6 +85,13 @@
       .timer-meta{min-width:auto; text-align:left}
     }
   </style>
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="Candy.webp" type="image/webp">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
 </head>
 <body>
   <div class="container">
@@ -459,5 +466,20 @@
   <style>#diagFab{position:fixed;right:16px;bottom:16px;z-index:80;border:none;border-radius:999px;padding:12px 14px;cursor:pointer;font-weight:700;background:var(--accent);color:#0b1220;box-shadow:0 10px 28px rgba(0,0,0,.35)} #diagFab:hover{transform:translateY(-1px)}</style>
   <button id="diagFab" title="Diagnosztika / Napló">🧪 Napló</button>
   <script>(function(){ function t(){var c=document.getElementById('diagCard'); if(c) c.style.display=(c.style.display==='none'||!c.style.display)?'block':'none'; } document.getElementById('diagFab').onclick=t; document.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='d'||e.key==='D')) t(); }); document.getElementById('clearLogBtn')?.addEventListener('click',()=>{ const box=document.getElementById('cloudLog'); if(box) box.innerHTML=''; }); document.getElementById('hideLogBtn')?.addEventListener('click',t); })();</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => {
+        navigator.serviceWorker.addEventListener('message', (e) => {
+          if (e.data === 'sw-updated') {
+            console.log('PWA frissült — töltsd újra az oldalt az új verzióhoz.');
+          }
+        });
+      })
+      .catch(err => console.warn('SW reg error', err));
+  });
+}
+</script>
 </body>
 </html>
