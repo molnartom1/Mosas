@@ -47,8 +47,7 @@
     .hint{font-size:12px;opacity:.8}
     .error{color:#fecaca;font-size:13px;min-height:18px}
     .machine-info{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-    .machine-info img{width:100%;max-width:280px;height:auto;object-fit:contain;border-radius:10px;border:1px solid var(--border);background:#fff;cursor:pointer;transition:transform .3s}
-    .machine-info img:hover{transform:scale(1.05)}
+    .machine-info img{width:140px;max-height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--border);background:#fff}
     .link-btn{display:inline-block;text-decoration:none;padding:8px 12px;border-radius:10px}
     .filters{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
     .filters .col-2{grid-column:span 2}
@@ -102,9 +101,7 @@
     <section class="card" aria-labelledby="machineInfoTitle">
       <h2 id="machineInfoTitle" style="margin:0 0 8px 0;font-size:1.1rem">Mosógép: <strong>CANDY RPW 4856BWR8</strong></h2>
       <div class="machine-info">
-        <a class="machine-link" href="https://d15v10x8t3bz3x.cloudfront.net/Libretti/2024/8/17229341/70029341WDRapidoRPWNECCSHUROSK" target="_blank" rel="noopener" title="Kézikönyv megnyitása új lapon">
-          <img id="machinePhoto" src="Candy.webp" alt="CANDY RPW 4856BWR8" />
-        </a>
+        <img id="machinePhoto" src="Candy.webp" alt="CANDY RPW 4856BWR8" />
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <a class="link-btn primary" href="https://d15v10x8t3bz3x.cloudfront.net/Libretti/2024/8/17229341/70029341WDRapidoRPWNECCSHUROSK" target="_blank" rel="noopener">📘 Kézikönyv (HU/RO/SK)</a>
           <a class="link-btn muted" href="https://docgenerator.candy.it/docgenerator/productdetails?lan=HU&sku=31019842&mkt=hu" target="_blank" rel="noopener">📄 Terméklap</a>
@@ -381,8 +378,10 @@
       document.getElementById('themeToggle').onclick=()=>{ const light=document.documentElement.classList.contains('light'); applyTheme(light?'dark':'light'); };
       document.getElementById('date').value=today();
       loadAll();
-      const img = document.getElementById('machinePhoto');
-      if(img){ img.onerror = () => { (img.parentElement||img).style.display='none'; }; }
+      const img=document.getElementById('machinePhoto'); img&& (img.onerror=()=>{img.style.display='none'});
+      document.getElementById('washForm').addEventListener('submit',ev=>{ev.preventDefault(); const e=readForm(); if(!e.person||!e.item){alert('A "Személy" és a "Tétel(ek)" kötelező.');return;} upsert(e); clearForm(); showToast('Bejegyzés mentve');});
+      document.addEventListener('keydown',async ev=>{ if((ev.ctrlKey||ev.metaKey)&&ev.key==='Enter'){ev.preventDefault(); document.getElementById('washForm').dispatchEvent(new Event('submit'));} if(ev.key==='Escape') clearForm(); if(ev.key==='Delete'&&editId){ const ok=await openPinModal(); if(ok){ remove(editId); clearForm(); showToast('Bejegyzés törölve'); }} });
+      document.getElementById('resetBtn').onclick=()=>{ clearForm(); showToast('Űrlap törölve'); };
       document.getElementById('deleteBtn').onclick=async()=>{ if(!editId)return; const ok=await openPinModal(); if(ok){ remove(editId); clearForm(); showToast('Bejegyzés törölve'); }};
       document.getElementById('tableBody').addEventListener('click',ev=>{ const tr=ev.target.closest('tr'); if(!tr)return; [...document.getElementById('tableBody').children].forEach(r=>r.classList.remove('selected')); tr.classList.add('selected'); editId=tr.dataset.id; const e=entries.find(x=>x.id===editId); if(!e)return; writeForm(e); document.getElementById('saveBtn').textContent='Frissítés'; document.getElementById('deleteBtn').disabled=false; window.scrollTo({top:0,behavior:'smooth'}); const st=document.getElementById('startTimerBtn'); if(st) st.disabled=false; });
       document.getElementById('detergentAdd').onclick=()=>{ addToList('det',document.getElementById('detergentNew').value); showToast('Mosószer hozzáadva'); };
